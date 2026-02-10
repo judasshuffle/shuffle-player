@@ -1,5 +1,5 @@
 # shuffle-player
-
+This is a personal learning project and an opinionated tool,not a polished product or commericial offering.*
 Offline voice-controlled music player for Raspberry Pi.
 
 ## What it does
