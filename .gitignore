@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+asr-env/
+
+# Runtime / generated
+utterance.wav
+jukebox_index.json
+jukebox_index.log
+*.log
+
+# Secrets
+.smbcredentials
+/root/.smbcredentials
+
+# OS/editor
+.DS_Store
+*.swp
