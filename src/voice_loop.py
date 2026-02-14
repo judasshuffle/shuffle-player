@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 import re
 import os
-import json
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import random
 import subprocess
 import time
 from difflib import get_close_matches
 from faster_whisper import WhisperModel
+from library_db import db_connect, fetch_tracks_for_artist, fetch_tracks_for_artist_year_range, build_target_playlist, write_m3u
 
 AUDIO_FILE = "utterance.wav"
 ARTISTS_FILE = "artists.txt"
 MUSIC_ROOT = "/mnt/lossless"
-INDEX_FILE = "/home/dan/jukebox_index.json"
 PLAYLIST_SECONDS = 3600
 
 current_player = None
@@ -34,13 +35,6 @@ def load_artists():
     with open(ARTISTS_FILE, "r", encoding="utf-8", errors="ignore") as f:
         return [line.strip() for line in f if line.strip()]
 
-def load_index_tracks():
-    with open(INDEX_FILE, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    tracks = data.get("tracks", [])
-    for t in tracks:
-        t["_artist_norm"] = normalize(t.get("artist", ""))
-    return tracks
 
 def detect_decade(text):
     t = normalize(text)
@@ -126,69 +120,35 @@ def stop_current():
             current_player.kill()
             current_player.wait()
 
-def play_artist_folder(artist_folder):
+def play_artist_sqlite(artist_name: str):
     global current_player
-    path = os.path.join(MUSIC_ROOT, artist_folder)
-    print("Playing (artist shuffle): " + path)
-    stop_current()
-    current_player = subprocess.Popen(["mpv", "--no-video", "--shuffle", path])
+    con = db_connect()
+    rows = fetch_tracks_for_artist(con, artist_name)
+    con.close()
 
-def build_hour_playlist(tracks, artist_name, y1, y2):
-    a_norm = normalize(artist_name)
-    pool = []
-    for t in tracks:
-        if t.get("_artist_norm") != a_norm:
-            continue
-        y = t.get("year")
-        if not isinstance(y, int):
-            continue
-        if y < y1 or y > y2:
-            continue
-        dur = float(t.get("duration") or 0.0)
-        if dur <= 0:
-            continue
-        p = t.get("path")
-        if not isinstance(p, str) or not p:
-            continue
-        if "/Playlists/" in p:
-            continue
-        pool.append((p, dur))
+    playlist_paths, total = build_target_playlist(rows, target_seconds=PLAYLIST_SECONDS)
+    m3u = write_m3u(playlist_paths)
 
-    random.shuffle(pool)
-    out = []
-    total = 0.0
-    for p, dur in pool:
-        out.append(p)
-        total += dur
-        if total >= PLAYLIST_SECONDS:
-            break
-    return out, total, len(pool)
-
-def play_playlist_paths(paths):
-    global current_player
-    if not paths:
+    if not m3u:
+        print(f"No playable tracks found in DB for: {artist_name}")
         return
-    playlist_path = "/tmp/jukebox_playlist.m3u8"
-    with open(playlist_path, "w", encoding="utf-8") as f:
-        for p in paths:
-            f.write(p + "\n")
 
-    print("Playing (playlist): " + playlist_path)
+    mins = int(total // 60)
+    print(f"Playing ~{mins} mins of {artist_name} ({len(playlist_paths)} tracks)")
     stop_current()
-    current_player = subprocess.Popen([
-        "mpv",
+    current_player = subprocess.Popen(["mpv",
         "--no-video",
         "--shuffle",
-        f"--playlist={playlist_path}"
-    ])
+        f"--playlist={m3u}"
+    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
 
 def main():
     print("Voice Jukebox ready. Ctrl+C to quit.")
     artists = load_artists()
     print(f"Loaded {len(artists)} artists.")
-    print("Loading index...")
-    tracks = load_index_tracks()
-    print(f"Indexed tracks loaded: {len(tracks)}")
+    print("Using SQLite index: /home/dan/jukebox.db")
 
     print("Loading ASR model...")
     asr = WhisperModel("small", compute_type="int8")
@@ -208,14 +168,25 @@ def main():
 
         if label:
             print(f"Building ~1 hour playlist: {label} {artist}")
-            paths, total, cand = build_hour_playlist(tracks, artist, y1, y2)
-            if cand == 0 or not paths:
+            con = db_connect()
+            rows = fetch_tracks_for_artist_year_range(con, artist, y1, y2)
+            con.close()
+
+            playlist_paths, total = build_target_playlist(rows, target_seconds=PLAYLIST_SECONDS)
+            m3u = write_m3u(playlist_paths)
+            if not m3u:
                 print(f"No indexed tracks found for {artist} in {y1}-{y2}.")
                 continue
-            print(f"Picked {len(paths)} tracks from {cand} candidates (~{int(total)}s)")
-            play_playlist_paths(paths)
+
+            print(f"Picked {len(playlist_paths)} tracks (~{int(total)}s)")
+            stop_current()
+            current_player = subprocess.Popen(["mpv",
+                "--no-video",
+                "--shuffle",
+                f"--playlist={m3u}"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
-            play_artist_folder(artist)
+            play_artist_sqlite(artist)
 
 if __name__ == "__main__":
     try:

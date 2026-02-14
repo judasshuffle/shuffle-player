@@ -1,20 +1,24 @@
 # Python
 __pycache__/
 *.pyc
-.venv/
-venv/
+
+# Backups / editor junk
+*.save
+*.bak*
+*.broken*
+
+# SQLite runtime
+*.db
+*.db-wal
+*.db-shm
+
+# Audio temp
+utterance.wav
+*.m3u
+*.m3u8
+
+# Virtual env
 asr-env/
 
-# Runtime / generated
-utterance.wav
-jukebox_index.json
-jukebox_index.log
-*.log
-
-# Secrets
-.smbcredentials
-/root/.smbcredentials
-
-# OS/editor
+# OS junk
 .DS_Store
-*.swp
