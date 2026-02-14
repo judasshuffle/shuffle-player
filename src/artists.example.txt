@@ -1,0 +1,445 @@
+10cc
+ABBA
+AC+DC
+AC_DC
+Adam and the Ants
+Adam Ant
+Adele
+Aerosmith
+Alabama Shakes
+Alanis Morissette
+Alex Turner
+Al Green
+Alice Cooper
+Alison Moyet
+Allen Ginsberg
+Allo Darlin’
+all_tracks.txt
+Amy Winehouse
+Annie Lennox
+Antonio Vivaldi; Gli Incogniti, Amandine Beyer
+Arctic Monkeys
+Aretha Franklin
+Arlo Guthrie
+Arne Domnérus
+Art Garfunkel
+Babyshambles
+Baby Washington
+Bad Company
+Barbra Streisand
+B.B. King & Eric Clapton
+Beastie Boys
+Beck
+Bee Gees
+Belle and Sebastian
+Belle & Sebastian
+Big Brother & the Holding Company
+Billie Holiday
+Billie Joe + Norah
+Bill Withers
+Billy Bragg
+Billy Idol
+Billy Joel
+Björk
+black grape
+Black Rebel Motorcycle Club
+Blind Faith
+Blondie
+Blossom Dearie, Les Blue Stars
+Blues Brothers
+Blur
+Bob Brozman
+Bobby Vee
+Bobby Womack
+Bob Dylan
+Bob Dylan And The Band
+Bob Dylan & The Band
+Bob Dylan _ The Band
+Bob Dylan & Tom Petty
+Bob Marley & The Wailers
+Bob Neuwirth
+Bonnie Tyler
+Booker T. & the M.G.’s
+Booker T. & the MG’s
+Bruce Springsteen
+Bruce Springsteen & The E Street Band
+Bruce Willis
+Bryan Adams
+Bryan Ferry
+Buckingham Nicks
+Buena Vista Social Club
+Buffalo Springfield
+Buffalo Tom
+Carole King
+Cat Stevens
+CeeLo Green
+Cesária Évora
+Chappell Roan
+Cher
+Chris Isaak
+Chuck Berry
+Cigarettes After Sex
+Coldplay
+Colter Wall
+Combichrist
+Commodores
+Counting Crows
+Cowboy Junkies
+Creedence Clearwater Revival
+Crosby, Stills & Nash
+Daft Punk
+Dave Edmunds
+Dave Loggins
+Dave Stewart
+David Bowie
+David Chesky
+David Johansen and the Harry Smiths
+David Lee Roth
+David Soul
+Dean Martin
+Delaney & Bonnie
+Delaney & Bonnie & Friends
+De La Soul
+Depeche Mode
+Derek And The Dominos
+Dexter Gordon
+Dexys Midnight Runners
+Diane Warren
+Dion & The Belmonts
+Dire Straits
+Dixie Chicks
+Django Reinhardt
+Django Reinhardt & Stéphane Grappelli
+Dolly Parton
+Donovan
+Dr. Dre
+Dr. Feelgood
+Dr. Hook
+Dr. John
+Duke Ellington and His Orchestra
+Dusty Springfield
+Elbow
+Electric Light Orchestra
+Electric Six
+Elmore James
+ELO
+Elton John
+Elton John & Brandi Carlile
+Elvis Costello
+Elvis Costello & Brodsky Quartet
+Elvis Costello & The Attractions
+Elvis Costello & The Imposters
+Elvis Presley
+Emerson, Lake & Palmer
+Eminem
+Enrique
+Eric Clapton
+Eurythmics
+Faces
+Faith No More
+Feist
+Fine Young Cannibals
+Fleetwood Mac
+Foo Fighters
+Francis Albert Sinatra & Antônio Carlos Jobim
+Françoise Hardy
+Frank Sinatra
+Frank Sinatra, Dean Martin, Sammy Davis, Jr_
+Frank Zappa
+Frank Zappa and The Mothers of Invention
+Frank Zappa & Captain Beefheart
+Franz Ferdinand
+Free
+Fun Lovin’ Criminals
+Gary Numan
+Gary Numan + Tubeway Army
+Genesis
+George Benson
+George Formby
+Gil Scott‐Heron
+Glen Campbell
+Gloria Gaynor
+Goldfrapp
+Gorillaz
+GRAM PARSONS
+Grant Green
+Grateful Dead
+Green Day
+Grin
+Guns N’ Roses
+Half Man Half Biscuit
+Hall & Oates
+Hank Mobley
+Happy Mondays
+Herb Alpert’s Tijuana Brass
+Herbie Hancock
+Horace Silver And The Jazz Messengers
+Hothouse Flowers
+Huey and the New Yorkers
+I Am Kloot
+Ian Dury & The Blockheads
+IDLES
+Ike & Tina Turner
+Imelda May
+Indigo Girls
+Iris DeMent
+Isaac Hayes
+Jack Johnson
+James
+James Brown
+James Brown & His Famous Flames
+James Taylor
+Jamiroquai
+Janis Joplin
+J.D. Souther
+Jean Michel Jarre
+Jeff Buckley
+Jethro Tull
+Jimi Hendrix
+Jimmy Smith
+Jimmy Webb
+J.J. Cale
+J.J. Cale & Eric Clapton
+Joe Jackson
+John Cale
+John Coltrane
+John Coltrane and Johnny Hartman
+John Coltrane Quartet
+John Denver
+John Lennon
+John Lennon_Plastic Ono Band
+John Lennon _ The Rolling Stones
+John Mayall & the Bluesbreakers
+Johnny Cash
+John Prine
+Joni Mitchell
+Joy Division
+Julie London
+Kara’s Flowers
+Kate Bush
+Keane
+Keith Richards
+King Crimson
+King Curtis & The Kingpins
+Kings of Leon
+KISS
+Kraftwerk
+Larry Young
+Laurie Anderson
+Lauryn Hill
+LCD Soundsystem
+LeAnn Rimes
+Led Zeppelin
+Leonard Cohen
+Leo Sayer
+Lily Allen
+Lindisfarne
+Little Steven
+Little Steven and the Disciples of Soul
+Lord Huron
+Lou Donaldson
+Louis Armstrong
+Lou Reed
+Lou Reed, John Cale & Nico
+Luciano Pavarotti
+Lyle Lovett
+Lynyrd Skynyrd
+Madrugada
+Magic Sam Blues Band
+Manassas
+Marc Ribot
+Mark Ronson
+Maroon 5
+Marvin Hamlisch _ Mundell Lowe
+Mazzy Star
+Meat Loaf
+Merrilee Rush
+Metallica
+Metal Machine Trio
+MGMT
+Michael Bublé
+Michael Jackson
+Michelle Shocked
+Mick Jagger
+Mick Ronson
+Mike Bloomfield, Al Kooper & Stephen Stills
+Miles Davis
+Miles Kane
+Morphine
+Mudcrutch
+Muddy Waters
+Neil Diamond
+Neil Young
+Neil Young and Crazy Horse
+Neil Young & Crazy Horse
+Neil Young & Shocking Pinks
+Neil Young & The Bluenotes
+Neil Young & The Restless
+Neil Young With Crazy Horse
+New York Dolls
+Nick Cave & the Bad Seeds
+Nick Drake
+Nick Lowe
+Nils Lofgren
+Nils Lofgren & Grin
+Nilsson
+Nirvana
+Norah Jones
+NRBQ
+Oasis
+Ocean Colour Scene
+OK Go
+Oscar peterson
+Other Lives
+Otis Redding
+Paolo Nutini
+Paul Simon
+Paul Weller
+Pearl Jam
+Peter Frampton
+Pet Shop Boys
+Phil Collins
+Phil Spector
+Phoebe Bridgers
+Plan B
+Playlists
+P!nk
+Pokey LaFarge
+Pokey Lafarge And The South City Three
+Pretenders
+Prince
+Prince and The Revolution
+Pulp
+Queen
+Queens of the Stone Age
+Radiohead
+Rage Against the Machine
+Ramones
+Ray Charles
+RAYE
+Red Hot Chili Peppers
+R.E.M_
+Richard Ashcroft
+Riff Raff
+Rihanna, Kanye West & Paul McCartney
+Ringo Starr
+Robbie Robertson
+Roberta Flack
+Robert Palmer
+Rodriguez
+Rod Stewart
+Ronnie Lane
+Roxette
+Roxy Music
+Roy Orbison
+Ry Cooder
+Sade
+Sam Cooke
+Sam & Dave
+Santana
+Scott Walker
+Sex Pistols
+Shakira
+Shed Seven
+Shel Silverstein
+Sierra Ferrell
+Simon & Garfunkel
+SJD
+Slash
+Small Faces
+Smokey Robinson & The Miracles
+Sonny Rollins
+Soul Asylum
+Southside Johnny & The Asbury Jukes
+Squeeze
+Steely Dan
+Stephen Stills
+Steve Forbert
+Stevie Wonder
+Sting
+Sting & The Police
+Suede
+Supergrass
+Suzanne Vega
+Talking Heads
+Taylor Swift
+Tennis
+The Allman Brothers Band
+The B‐52’s
+The Band
+The Beach Boys
+The Beatles
+The Beautiful South
+The Beta Band
+The Black Crowes
+The Blues Brothers
+The Boomtown Rats
+The Breeders
+The Cardigans
+The Cars
+The Chicks
+The Clash
+The Crickets _ Buddy Holly
+The Dave Brubeck Quartet
+The Dead South
+The Dixie Chicks Cowgirl Band
+The Doors
+The Future Sound of London
+The Hooters
+The Isley Brothers
+The Jam
+The J. Geils Band
+The Jimi Hendrix Experience
+The Kinks
+The Kooks
+The La’s
+Them
+The Monkees
+The Offspring
+The Pistol & the Queen
+The Pogues
+The Police
+The Pretenders
+The Rails
+The Rat Pack
+The Rolling Stones
+The Ronettes
+The Searchers
+The Smiths
+The Spencer Davis Group
+The Stranglers
+The Strokes
+The Style Council
+The Velvet Underground
+The Velvet Underground & Nico
+The Verve
+The Wallflowers
+The White Stripes
+They Might Be Giants
+The Zutons
+Tommy Emmanuel, CGP
+Tom Paxton
+Tom Petty
+Tom Petty and the Heartbreakers
+Tom Waits
+Tom Waits and Crystal Gayle
+Tony Bennett and Bill Evans
+Townes Van Zandt
+Traveling Wilburys
+Tsege Mariam Gebru
+Tubeway Army
+Tyrone Davis
+U2
+UFO
+Vampire Weekend
+Van Halen
+Van Morrison
+Various Artists
+Vince Guaraldi Trio
+Vivaldi; Nigel Kennedy, English Chamber Orchestra
+Weezer
+Wet Leg
+Yeah Yeah Yeahs
+Yes
+Young Marble Giants
+ZZ Top
