@@ -2,6 +2,8 @@
 import re
 import os
 import sys
+import signal
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import random
 import subprocess
@@ -23,6 +25,7 @@ ARECORD_CMD = [
     "-f", "S16_LE",
     "-r", "16000",
     "-c", "1",
+    "-d", "5",
     AUDIO_FILE,
 ]
 
@@ -89,23 +92,21 @@ def pick_artist(user_text, artists):
 
 def record_audio():
     print("\nPress Enter to START recording...")
-    input()
+    sys.stdin.readline()
     time.sleep(0.2)
 
-    print("Recording... press Enter to STOP.")
-    rec = subprocess.Popen(ARECORD_CMD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    input()
-    time.sleep(0.2)
-
-    rec.terminate()
-    try:
-        rec.wait(timeout=1.5)
-    except subprocess.TimeoutExpired:
-        rec.kill()
-        rec.wait()
-
+    print("Recording 5 seconds...")
+    rec = subprocess.Popen(
+        ARECORD_CMD,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    rec.wait()
     print("Recorded.")
+
+
+
+
 
 def transcribe(asr_model):
     segments, _ = asr_model.transcribe(AUDIO_FILE, language="en")
@@ -143,8 +144,51 @@ def play_artist_sqlite(artist_name: str):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
+def play_random_sqlite():
+    global current_player
+    con = db_connect()
+    rows = con.execute("""
+        SELECT path, duration
+        FROM tracks
+        WHERE duration IS NOT NULL AND duration > 30
+          AND path NOT LIKE '%/Playlists/%'
+          AND path NOT LIKE '/mnt/lossless/Playlists/%'
+        ORDER BY RANDOM()
+        LIMIT 5000
+    """).fetchall()
+    con.close()
+
+    playlist_paths, total = build_target_playlist(rows, target_seconds=PLAYLIST_SECONDS)
+    m3u = write_m3u(playlist_paths)
+    if not m3u:
+        print("No tracks available for random play.")
+        return
+
+    print(f"Playing random mix (~{int(total//60)} mins) ({len(playlist_paths)} tracks)")
+    stop_current()
+    current_player = subprocess.Popen(
+        ["mpv", "--no-video", "--shuffle", f"--playlist={m3u}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 def main():
+    global current_player
+    # Check microphone availability
+    test = subprocess.run(
+        ["arecord", "-l"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    out = (test.stdout or "") + "\n" + (test.stderr or "")
+
+    if "card" not in out.lower():
+        print("No microphone detected.")
+        print("Plug in mic and restart.")
+        return
+
+
     print("Voice Jukebox ready. Ctrl+C to quit.")
     artists = load_artists()
     print(f"Loaded {len(artists)} artists.")
@@ -158,6 +202,11 @@ def main():
         record_audio()
         text = transcribe(asr)
         print("You: " + text)
+        t = normalize(text)
+        if t in {"play some music", "play music", "play some", "play something", "surprise me"}:
+            play_random_sqlite()
+            continue
+
 
         y1, y2, label = detect_decade(text)
         artist = pick_artist(text, artists)
