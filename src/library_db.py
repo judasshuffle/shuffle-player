@@ -4,7 +4,7 @@ import tempfile
 import random
 from typing import List, Tuple, Optional
 
-DB_PATH = "/home/dan/jukebox.db"
+from config import DB_PATH, MUSIC_ROOT
 TARGET_SECONDS_DEFAULT = 60 * 60  # ~1 hour
 
 def db_connect(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -21,10 +21,10 @@ def fetch_tracks_for_artist(con: sqlite3.Connection, artist: str, limit: int = 8
         AND duration IS NOT NULL
         AND duration > 30
         AND path NOT LIKE '%/Playlists/%'
-        AND path NOT LIKE '/mnt/lossless/Playlists/%'
+        AND path NOT LIKE ?
       ORDER BY year IS NULL, year, RANDOM()
       LIMIT ?
-    """, (artist, limit))
+    """, (artist, f"{MUSIC_ROOT}/Playlists/%", limit))
     return list(cur.fetchall())
 
 def build_target_playlist(rows, target_seconds: int = TARGET_SECONDS_DEFAULT) -> Tuple[List[str], float]:
@@ -70,8 +70,8 @@ def fetch_tracks_for_artist_year_range(con: sqlite3.Connection, artist: str, y1:
         AND duration IS NOT NULL
         AND duration > 30
         AND path NOT LIKE '%/Playlists/%'
-        AND path NOT LIKE '/mnt/lossless/Playlists/%'
+        AND path NOT LIKE ?
       ORDER BY year, RANDOM()
       LIMIT ?
-    """, (artist, int(y1), int(y2), limit))
+    """, (artist, int(y1), int(y2), f"{MUSIC_ROOT}/Playlists/%", limit))
     return list(cur.fetchall())

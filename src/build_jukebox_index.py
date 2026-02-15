@@ -5,8 +5,7 @@ import time
 import argparse
 from mutagen import File as MutagenFile
 
-MUSIC_ROOT = "/mnt/lossless"
-OUT_JSON = "/home/dan/jukebox_index.json"
+from config import MUSIC_ROOT, INDEX_JSON_PATH
 
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".aiff", ".alac"}
 
@@ -88,10 +87,10 @@ def file_sig(path: str):
         return None
 
 def load_existing_index():
-    if not os.path.exists(OUT_JSON):
+    if not os.path.exists(INDEX_JSON_PATH):
         return {}
     try:
-        with open(OUT_JSON, "r", encoding="utf-8") as f:
+        with open(INDEX_JSON_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         tracks = data.get("tracks", [])
         # map: path -> (track, sig)
@@ -154,11 +153,11 @@ def main():
         "tracks": tracks,
     }
 
-    with open(OUT_JSON, "w", encoding="utf-8") as f:
+    with open(INDEX_JSON_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
     dt = time.time() - t0
-    print(f"\nWrote {OUT_JSON}")
+    print(f"\nWrote {INDEX_JSON_PATH}")
     print(f"Indexed {len(tracks)} tracks in {dt:.1f}s (seen {seen})")
     if args.update:
         print(f"Kept {kept} unchanged, updated {changed}, added {new}")

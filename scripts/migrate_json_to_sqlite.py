@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-import json, os, sqlite3, time
+import json
+import os
+import sys
+import sqlite3
+import time
 from pathlib import Path
 
-JSON_PATH = "/home/dan/jukebox_index.json"
-DB_PATH   = "/home/dan/jukebox.db"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from config import DB_PATH, INDEX_JSON_PATH
 
 def connect(db_path: str) -> sqlite3.Connection:
     con = sqlite3.connect(db_path)
@@ -58,7 +62,7 @@ def norm_float(v):
 def main():
     now = int(time.time())
 
-    with open(JSON_PATH, "r", encoding="utf-8") as f:
+    with open(INDEX_JSON_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     # Support either {"tracks":[...]} or direct list
@@ -124,7 +128,7 @@ def main():
     con.commit()
     con.close()
 
-    print(f"Imported {len(rows)} tracks into {DB_PATH} from {JSON_PATH}")
+    print(f"Imported {len(rows)} tracks into {DB_PATH} from {INDEX_JSON_PATH}")
 
 if __name__ == "__main__":
     main()

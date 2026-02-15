@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-import os, time, sqlite3
+import os
+import sys
+import time
+import sqlite3
 from pathlib import Path
 
-MUSIC_ROOT = "/mnt/lossless"
-DB_PATH    = "/home/dan/jukebox.db"
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
+from config import MUSIC_ROOT, DB_PATH
 AUDIO_EXTS = {".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav", ".aiff", ".alac"}
 
 def is_playlists_path(p: str) -> bool:
