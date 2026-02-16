@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import os
 import sys
 import time
@@ -35,7 +36,8 @@ def ensure_schema(con: sqlite3.Connection):
       size           INTEGER NOT NULL,
       ext            TEXT,
       added_at       INTEGER NOT NULL,
-      updated_at     INTEGER NOT NULL
+      updated_at     INTEGER NOT NULL,
+      genre          TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_tracks_artist ON tracks(artist);
     CREATE INDEX IF NOT EXISTS idx_tracks_year   ON tracks(year);
@@ -46,6 +48,13 @@ def ensure_schema(con: sqlite3.Connection):
       value TEXT NOT NULL
     );
     """)
+    # Existing DBs: add genre column if missing (CREATE TABLE IF NOT EXISTS won't alter existing table)
+    try:
+        con.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    con.execute("CREATE INDEX IF NOT EXISTS idx_tracks_genre ON tracks(genre)")
 
 def is_playlists_path(p: str) -> bool:
     s = p.replace("\\", "/")
@@ -88,6 +97,14 @@ def read_tags(path: str):
         except Exception:
             year_i = None
 
+    genre_raw = tags.get("genre") or tags.get("genres")
+    if genre_raw is not None and isinstance(genre_raw, list) and genre_raw:
+        genre = norm(str(genre_raw[0]))
+    elif genre_raw is not None:
+        genre = norm(str(genre_raw))
+    else:
+        genre = None
+
     duration = None
     bitrate = samplerate = channels = None
     if info:
@@ -106,6 +123,7 @@ def read_tags(path: str):
         "title": title,
         "tracknumber": tracknumber,
         "year": year_i,
+        "genre": genre,
         "duration": duration,
         "bitrate": bitrate,
         "samplerate": samplerate,
@@ -113,6 +131,12 @@ def read_tags(path: str):
     }
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--force", action="store_true",
+                    help="Re-read tags for every file and update rows even if mtime/size match")
+    args = ap.parse_args()
+    force = args.force
+
     con = connect()
     ensure_schema(con)
 
@@ -155,28 +179,29 @@ def main():
             scanned += 1
 
             prev = existing.get(path)
-            if prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
+            if not force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
                 skipped += 1
                 continue
 
             meta = read_tags(path)
             if meta is None:
                 meta = {"artist": None, "album": None, "title": None, "tracknumber": None,
-                        "year": None, "duration": None, "bitrate": None, "samplerate": None, "channels": None}
+                        "year": None, "genre": None, "duration": None, "bitrate": None, "samplerate": None, "channels": None}
 
             existed = prev is not None
             added_at = get_added_at(path) if existed else now
 
             con.execute("""
-              INSERT INTO tracks(path,artist,album,title,tracknumber,year,duration,bitrate,samplerate,channels,
+              INSERT INTO tracks(path,artist,album,title,tracknumber,year,genre,duration,bitrate,samplerate,channels,
                                  mtime,size,ext,added_at,updated_at)
-              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+              VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(path) DO UPDATE SET
                 artist=excluded.artist,
                 album=excluded.album,
                 title=excluded.title,
                 tracknumber=excluded.tracknumber,
                 year=excluded.year,
+                genre=excluded.genre,
                 duration=excluded.duration,
                 bitrate=excluded.bitrate,
                 samplerate=excluded.samplerate,
@@ -187,7 +212,7 @@ def main():
                 updated_at=excluded.updated_at
             """, (
                 path,
-                meta["artist"], meta["album"], meta["title"], meta["tracknumber"], meta["year"],
+                meta["artist"], meta["album"], meta["title"], meta["tracknumber"], meta["year"], meta["genre"],
                 meta["duration"], meta["bitrate"], meta["samplerate"], meta["channels"],
                 mtime, size, ext,
                 added_at,
