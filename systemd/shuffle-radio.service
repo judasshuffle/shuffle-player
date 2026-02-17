@@ -1,0 +1,25 @@
+[Unit]
+Description=Shuffle Radio Persistent Icecast Encoder
+After=network.target icecast2.service
+
+[Service]
+Type=simple
+User=dan
+EnvironmentFile=/etc/shuffle-radio.env
+Restart=on-failure
+RestartSec=2
+
+ExecStart=/bin/bash -lc '\
+  test -p /tmp/shuffle_radio.pcm || mkfifo -m 666 /tmp/shuffle_radio.pcm; \
+  chmod 666 /tmp/shuffle_radio.pcm; \
+  exec 8<>/tmp/shuffle_radio.pcm; \
+  exec /usr/bin/ffmpeg -hide_banner -nostdin -loglevel info \
+    -f lavfi -i anullsrc=r=44100:cl=stereo \
+    -f s16le -ar 44100 -ac 2 -i /tmp/shuffle_radio.pcm \
+    -filter_complex "[0:a][1:a]amix=inputs=2:duration=longest:dropout_transition=0" \
+    -c:a libmp3lame -b:a 128k -minrate 128k -maxrate 128k -bufsize 256k \
+    -f mp3 icecast://source:${SOURCEPASS}@127.0.0.1:8001/stream.mp3 \
+'
+
+[Install]
+WantedBy=multi-user.target
