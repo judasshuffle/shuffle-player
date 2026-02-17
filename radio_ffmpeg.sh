@@ -26,12 +26,14 @@ if [[ ! -p "$FIFO_PATH" ]]; then
     mkfifo "$FIFO_PATH"
 fi
 
-# Start ffmpeg: mix silence (anullsrc) with FIFO PCM, so stream never drops
+
+# Start ffmpeg: anullsrc is input 0, FIFO PCM is input 1, amix uses duration=first
 ffmpeg -hide_banner -loglevel warning \
     -thread_queue_size 512 \
-    -f s16le -ar 44100 -ac 2 -i "$FIFO_PATH" \
     -f lavfi -i "anullsrc=channel_layout=stereo:sample_rate=44100" \
-    -filter_complex "[1][0]amix=inputs=2:duration=longest:dropout_transition=2[aout]" \
+    -thread_queue_size 512 \
+    -f s16le -ar 44100 -ac 2 -i "$FIFO_PATH" \
+    -filter_complex "[0][1]amix=inputs=2:duration=first:dropout_transition=2[aout]" \
     -map "[aout]" \
     -vn -c:a libmp3lame -b:a 128k \
     -content_type audio/mpeg \
