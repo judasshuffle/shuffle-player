@@ -193,9 +193,9 @@ def play_artist_sqlite(artist_name: str):
     mins = int(total // 60)
     print(f"Playing ~{mins} mins of {artist_name} ({len(playlist_paths)} tracks)")
     stop_current()
-    mpv_cmd = ["mpv", "--no-video", "--shuffle", f"--input-ipc-server={MPV_IPC_SOCK}", f"--playlist={m3u}"]
-    print(" ".join(mpv_cmd))
-    current_player = subprocess.Popen(mpv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    feed_cmd = ["/home/dan/shuffle-player/feed_to_radio.sh", f"--playlist={m3u}"]
+    print("Calling:", " ".join(feed_cmd))
+    current_player = subprocess.Popen(feed_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def play_random_sqlite():
@@ -221,9 +221,9 @@ def play_random_sqlite():
     print(os.path.abspath(m3u))
     print(f"Playing random mix (~{int(total//60)} mins) ({len(playlist_paths)} tracks)")
     stop_current()
-    mpv_cmd = ["mpv", "--no-video", "--shuffle", f"--input-ipc-server={MPV_IPC_SOCK}", f"--playlist={m3u}"]
-    print(" ".join(mpv_cmd))
-    current_player = subprocess.Popen(mpv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    feed_cmd = ["/home/dan/shuffle-player/feed_to_radio.sh", f"--playlist={m3u}"]
+    print("Calling:", " ".join(feed_cmd))
+    current_player = subprocess.Popen(feed_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 def main():
     global current_player
@@ -257,11 +257,18 @@ def main():
         text = transcribe(asr, wav_path)
         print("You: " + text)
         t = normalize(text)
-        if t in {"play some music", "play music", "play some", "play something", "surprise me"}:
+        if t in {
+            "play some music", "play music", "play some", "play something", "surprise me",
+            "play random", "play randomly", "random", "shuffle everything",
+            "play everything", "play everything randomly", "play all music"
+        }:
             play_random_sqlite()
             continue
 
-        if t in {"start radio", "start the radio"}:
+        if t in {
+            "start radio", "start the radio",
+            "start stream", "start the stream"
+        }:
             try:
                 subprocess.Popen(
                     ["/home/dan/start_radio.sh"],
@@ -273,7 +280,10 @@ def main():
                 print("Radio start failed:", e)
             continue
 
-        if t in {"stop radio", "stop the radio"}:
+        if t in {
+            "stop radio", "stop the radio",
+            "stop stream", "stop the stream"
+        }:
             try:
                 subprocess.Popen(
                     ["/home/dan/stop_radio.sh"],
@@ -307,9 +317,9 @@ def main():
             print(os.path.abspath(m3u))
             print(f"Picked {len(playlist_paths)} tracks (~{int(total)}s)")
             stop_current()
-            mpv_cmd = ["mpv", "--no-video", "--shuffle", f"--input-ipc-server={MPV_IPC_SOCK}", f"--playlist={m3u}"]
-            print(" ".join(mpv_cmd))
-            current_player = subprocess.Popen(mpv_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            feed_cmd = ["/home/dan/shuffle-player/feed_to_radio.sh", f"--playlist={m3u}"]
+            print("Calling:", " ".join(feed_cmd))
+            current_player = subprocess.Popen(feed_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         else:
             play_artist_sqlite(artist)
 
