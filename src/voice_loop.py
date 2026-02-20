@@ -202,40 +202,67 @@ def words_to_number_0_100(text: str) -> Optional[int]:
 
 class MPVClient:
     def __init__(self, sock_path: str) -> None:
+        import threading
         self.sock_path = sock_path
+        self._lock = threading.Lock()
+        self._sock = None
+
+    def _close(self) -> None:
+        try:
+            if self._sock is not None:
+                self._sock.close()
+        except Exception:
+            pass
+        self._sock = None
+
+    def _connect(self) -> None:
+        self._close()
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2.0)
+        s.connect(self.sock_path)
+        self._sock = s
 
     def _send(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        import time
         data = (json.dumps(payload) + "\n").encode("utf-8")
         dlog(f"MPV send: {payload}")
 
-        try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
-                s.settimeout(2.0)
-                s.connect(self.sock_path)
-                s.sendall(data)
+        with self._lock:
+            for attempt in (1, 2):
+                try:
+                    if self._sock is None:
+                        self._connect()
 
-                # read one JSON response line (mpv replies per request_id)
-                buf = b""
-                while b"\n" not in buf:
-                    chunk = s.recv(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
+                    self._sock.sendall(data)
 
-            line = buf.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
-            if not line:
-                return {"error": "empty_response"}
-            resp = json.loads(line)
-            dlog(f"MPV resp: {resp}")
-            return resp
-        except FileNotFoundError:
-            return {"error": "mpv_socket_missing"}
-        except (socket.timeout, ConnectionError) as e:
-            return {"error": f"mpv_ipc_error: {e}"}
-        except json.JSONDecodeError:
-            return {"error": "mpv_bad_json_response"}
-        except Exception as e:
-            return {"error": f"mpv_unexpected: {e}"}
+                    buf = b""
+                    while b"\n" not in buf:
+                        chunk = self._sock.recv(4096)
+                        if not chunk:
+                            raise ConnectionError("mpv IPC socket closed")
+                        buf += chunk
+
+                    line = buf.split(b"\n", 1)[0].decode("utf-8", errors="replace").strip()
+                    if not line:
+                        return {"error": "empty_response"}
+                    resp = json.loads(line)
+                    dlog(f"MPV resp: {resp}")
+                    return resp
+
+                except FileNotFoundError:
+                    self._close()
+                    return {"error": "mpv_socket_missing"}
+                except (socket.timeout, ConnectionError, BrokenPipeError, OSError) as e:
+                    self._close()
+                    if attempt == 1:
+                        time.sleep(0.2)
+                        continue
+                    return {"error": f"mpv_ipc_error: {e}"}
+                except json.JSONDecodeError:
+                    return {"error": "mpv_bad_json_response"}
+                except Exception as e:
+                    self._close()
+                    return {"error": f"mpv_unexpected: {e}"}
 
     def command(self, *args: Any) -> Dict[str, Any]:
         return self._send({"command": list(args)})
@@ -1051,9 +1078,9 @@ class VoiceJukebox:
             return
 
         if cmd.intent == "pause":
-            log("Paused.")
-            self.mpv.pause()
+            log("Pause ignored (disabled for stability while debugging).")
             return
+
 
         if cmd.intent == "resume":
             log("Resumed.")
