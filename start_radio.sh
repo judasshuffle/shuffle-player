@@ -9,7 +9,4 @@ if [[ -f "$PIDFILE" ]] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
   exit 0
 fi
 
-  "$SCRIPT_DIR/radio_ffmpeg.sh"
-  echo "Starting shuffle-radio.service"
-  sudo systemctl start shuffle-radio.service
 "$SCRIPT_DIR/radio_ffmpeg.sh"

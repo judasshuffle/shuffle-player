@@ -13,7 +13,35 @@
     <div class="row">
       <label>Bank</label>
       <select id="bank"></select>
+
     </div>
+
+    <div class="row">
+<!-- Audio Source (v3) -->
+<div id="audioPanel" style="margin: 6px 0 10px 0;">
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label style="min-width:52px;">Audio</label>
+
+    <select id="audioMode">
+      <option value="stream">Stream (default)</option>
+      <option value="custom">Custom URL</option>
+      <option value="file">Local file</option>
+    </select>
+
+    <input id="audioUrl" type="url"
+      placeholder="https://example.com/stream.mp3 (or /stream.mp3)"
+      style="min-width: 260px; flex: 1; display:none;" />
+
+    <button id="audioConnect" style="display:none;">Connect</button>
+
+    <input id="audioFile" type="file" accept="audio/*" style="display:none;" />
+    <button id="audioPickFile" style="display:none;">Choose file</button>
+
+    <span id="audioStatus" style="opacity:0.8;"></span>
+  </div>
+</div>
+    </div>
+
     <div class="row">
       <label>Preset</label>
       <select id="preset"></select>
@@ -75,7 +103,8 @@
     controls
   ></audio>
 
-  <script type="module" src="/js/main.js"></script>
-<script src="js/settings.js"></script>
+  <script src="./js/settings.js"></script>
+  <script type="module" src="./js/main.js"></script>
+
 </body>
 </html>

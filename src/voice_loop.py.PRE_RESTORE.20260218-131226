@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 Raspberry Pi 5 Offline Voice Jukebox - voice_loop.py
@@ -38,7 +39,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # ----------------------------
 
 DB_PATH = os.getenv("JUKEBOX_DB", "/home/dan/jukebox.db")
-MPV_SOCKET = "/tmp/radio_mp.sock"
+MPV_SOCKET = os.getenv("MPV_IPC_SOCKET", "/tmp/radio_mpv.sock")
 
 START_STREAM_SH = os.getenv("START_STREAM_SH", "/home/dan/start_stream.sh")
 STOP_STREAM_SH = os.getenv("STOP_STREAM_SH", "/home/dan/stop_stream.sh")
@@ -109,16 +110,13 @@ def parse_decade_text(text: str) -> Optional[int]:
     m = re.search(r"\b(18|19|20)\d0s\b", t)
     if m:
         return int(m.group(0)[:4])
-    # 2-digit decade forms like 70s, 80s, 80's, 00s, 10s
-    m = re.search(r"\b(\d{2})\s*'?s\b", t)
+
+    m = re.search(r"\b(\d{2})0s\b", t)  # "70s" -> 1970/2070? assume 19xx for 50-99
     if m:
-        d2 = int(m.group(1))
-        # interpret 00-29 as 2000s (00s..20s), else 1900s (30s..90s)
-        if d2 <= 29:
-            return 2000 + d2
-        return 1900 + d2
-
-
+        xx = int(m.group(1))
+        if 50 <= xx <= 99:
+            return 1900 + xx * 10
+        return 2000 + xx * 10
 
     word_map = {
         "sixties": 1960,
@@ -275,37 +273,28 @@ class MPVClient:
         return newv
 
     def load_playlist(self, paths: Sequence[str], clear_first: bool = True) -> bool:
-        # Hard reset so we immediately switch away from whatever is currently playing
-        self.command("stop")
-
         if clear_first:
             self.command("playlist-clear")
 
         ok_any = False
-        first_loaded = False
-
-        for p in paths:
+        for i, p in enumerate(paths):
             if not p:
                 continue
+            # ensure exists (avoid mpv spam)
             if not Path(p).exists():
                 dlog(f"Missing path skipped: {p}")
                 continue
-
-            if not first_loaded:
-                resp = self.command("loadfile", p, "replace")
-                first_loaded = (resp.get("error") == "success")
-                ok_any = ok_any or first_loaded
-            else:
-                resp = self.command("loadfile", p, "append")
-                if resp.get("error") == "success":
-                    ok_any = True
+            mode = "replace" if (i == 0 and not clear_first) else "append"
+            # if we cleared first, use "append" for all and then start playing
+            resp = self.command("loadfile", p, "append")
+            if resp.get("error") == "success":
+                ok_any = True
 
         if ok_any:
-            self.command("playlist-play-index", 0)
             self.set_property("pause", False)
-
+            # ensure playback starts from first item
+            self.command("playlist-play-index", 0)
         return ok_any
-
 
 
 # ----------------------------
@@ -848,14 +837,7 @@ def parse_intent(transcript: str, artists: List[str]) -> ParsedCommand:
     has_trigger = any(re.search(rf"\b{re.escape(w)}\b", t) for w in play_triggers) or has_decade or has_year
 
     if not has_trigger:
-        # If the whole utterance matches an artist, treat it as "play <artist>"
-        a0 = best_match_artist(t, artists)
-        if a0 and len(a0.strip()) >= 3:
-            cmd = ParsedCommand(intent="play")
-            cmd.artist = a0
-            return cmd
-
-        # Otherwise ignore unrelated speech so we don't constantly reload playlists.
+        # Ignore unrelated speech so we don't constantly reload playlists.
         return ParsedCommand(intent="ignore")
 
     cmd = ParsedCommand(intent="play")
@@ -903,28 +885,6 @@ def parse_intent(transcript: str, artists: List[str]) -> ParsedCommand:
         if y is not None:
             # if we have explicit year, treat as similar-year window (feels natural)
             cmd.similar_year = y
-    # If the user just said a year (no "like/around"), treat as decade or exact year window
-    if cmd.similar_year is None:
-        y = extract_year(t)
-        if y is not None:
-            cmd.similar_year = y
-
-    # <<< INSERT GUARD HERE >>>
-    # Guard: if we heard "play ..." but extracted NO filters,
-    # ignore it (prevents headphone bleed from triggering shuffle-all).
-    # Allow explicit shuffle/music requests.
-    if not any([
-        cmd.artist,
-        cmd.genre,
-        cmd.early_late,
-        cmd.decade is not None,
-        cmd.similar_year is not None,
-    ]):
-        if re.search(r"\b(shuffle|random|play music|some music)\b", t) or t in ("shuffle", "random", "music"):
-            pass  # allow shuffle-all
-        else:
-            return ParsedCommand(intent="ignore")
-
 
     # limit (optional)
     m = re.search(r"\b(\d{1,3})\s+(songs|tracks)\b", t)
@@ -1006,21 +966,6 @@ class WhisperTranscriber:
 # ----------------------------
 
 class VoiceJukebox:
-
-
-    def handle(self, cmd) -> None:
-        """Dispatch a ParsedCommand to the right handler."""
-        if cmd is None:
-            return
-        if getattr(cmd, "intent", None) in (
-            "skip", "pause", "resume", "stop", "status",
-            "mute", "unmute", "volume_up", "volume_down", "volume_set",
-        ):
-            return self._handle_control(cmd)
-        if getattr(cmd, "intent", None) == "play":
-            return self._handle_play(cmd)
-        return
-
     def __init__(self) -> None:
         self.db = LibraryDB(DB_PATH)
         self.mpv = MPVClient(MPV_SOCKET)
@@ -1040,6 +985,39 @@ class VoiceJukebox:
 
     def stop(self) -> None:
         self._running = False
+
+   def handle(self, cmd: ParsedCommand) -> None:
+    if cmd.intent == "ignore":
+        return
+
+    # Cooldown: prevent repeated identical play commands from resetting track 0
+    now = time.time()
+    sig = (
+        cmd.intent,
+        cmd.artist,
+        cmd.decade,
+        cmd.year_range,
+        cmd.genre,
+        cmd.similar_year,
+        cmd.early_late,
+        cmd.limit,
+    )
+    if not hasattr(self, "_last_cmd_sig"):
+        self._last_cmd_sig = None
+        self._last_cmd_time = 0.0
+
+    if cmd.intent == "play" and sig == self._last_cmd_sig and (now - self._last_cmd_time) < 8.0:
+        dlog("Ignoring repeated play command (cooldown).")
+        return
+
+    self._last_cmd_sig = sig
+    self._last_cmd_time = now
+
+
+        if cmd.intent in CONTROL_INTENTS:
+            self._handle_control(cmd)
+        else:
+            self._handle_play(cmd)
 
     def _handle_control(self, cmd: ParsedCommand) -> None:
         if cmd.intent == "skip":
@@ -1238,7 +1216,6 @@ def main() -> int:
             try:
                 artists = jukebox.db.get_artists()
                 cmd = parse_intent(text_n, artists)
-                log(f"DEBUG CMD intent={getattr(cmd,'intent',None)} artist={getattr(cmd,'artist',None)} decade={getattr(cmd,'decade',None)} similar_year={getattr(cmd,'similar_year',None)} genre={getattr(cmd,'genre',None)} early_late={getattr(cmd,'early_late',None)} limit={getattr(cmd,'limit',None)}")
                 jukebox.handle(cmd)
             except Exception as e:
                 log(f"Command handling error: {e}")

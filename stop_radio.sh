@@ -17,8 +17,7 @@ if [[ -f "$PIDFILE" ]]; then
   fi
   rm -f "$PIDFILE"
 else
-  echo "Stopping shuffle-radio.service"
-  sudo systemctl stop shuffle-radio.service
+  echo "shuffle radio: Not running"
 fi
 
 if [[ -p "$FIFO_PATH" ]]; then

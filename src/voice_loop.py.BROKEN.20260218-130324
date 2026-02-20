@@ -1,0 +1,415 @@
+    # Otherwise: only treat as "play" if the user actually asked to play something.
+    play_triggers = (
+        "play", "shuffle", "random", "music",
+        "artist", "by", "genre",
+        "early", "late",
+        "like", "around", "near"
+    )
+
+    # Tighten triggering so we don't retrigger from our own audio.
+    # Decade/year alone is NOT enough - require an action word or an explicit selector word.
+    has_decade = parse_decade_text(t) is not None
+    has_year = extract_year(t) is not None
+    has_action = bool(re.search(r"\b(play|shuffle|random|music)\b", t))
+    has_selector = bool(re.search(r"\b(artist|by|genre)\b", t))
+    has_trigger = any(re.search(rf"\b{re.escape(w)}\b", t) for w in play_triggers) or has_decade or has_year
+    if (has_decade or has_year) and not (has_action or has_selector):
+        has_trigger = False
+
+
+    if not has_trigger:
+        # Ignore unrelated speech so we don't constantly reload playlists.
+        return ParsedCommand(intent="ignore")
+
+    cmd = ParsedCommand(intent="play")
+
+
+    # early/late
+    if re.search(r"\b(early|old|first)\b", t):
+        cmd.early_late = "early"
+    if re.search(r"\b(late|later|new|recent)\b", t):
+        cmd.early_late = "late"
+
+    # similar-year
+    if re.search(r"\b(like|around|near|something like)\b", t):
+        y = extract_year(t)
+        if y is not None:
+            cmd.similar_year = y
+
+    # decade
+    dec = parse_decade_text(t)
+    if dec is not None:
+        cmd.decade = dec
+
+    # genre (best-effort)
+    cmd.genre = extract_genre(t)
+
+
+    # Use a cleaned text for artist matching so decade tokens don't dilute scoring.
+    artist_text = re.sub(r"\b(18|19|20)\d0s\b", " ", t)
+    artist_text = re.sub(r"\b\d{2}'?s\b", " ", artist_text)
+    artist_text = re.sub(r"\b(sixties|seventies|eighties|nineties|noughties|tens|twenty\s+tens|twenties)\b", " ", artist_text)
+    artist_text = re.sub(r"\s+", " ", artist_text).strip()
+    # artist
+    # Only try to match an artist when the user clearly intends it.
+    # This prevents accidental matches like "U2" from noise / "you too" / filler words.
+    explicit_artist = bool(re.search(r"\b(artist|by)\b", t)) or t.startswith("play ") or t.startswith("shuffle ")
+
+    # If it's just "shuffle" (or very short), don't guess an artist.
+    if t in ("shuffle", "play", "music", "random"):
+        explicit_artist = False
+
+    if explicit_artist:
+        artist = best_match_artist(artist_text, artists)
+        # Avoid accidental ultra-short artist matches unless explicitly requested.
+        if artist and len(artist.strip()) >= 3:
+           cmd.artist = artist
+
+
+    # If the user just said a year (no "like/around"), treat as decade or exact year window
+    if cmd.similar_year is None:
+        y = extract_year(t)
+        if y is not None:
+            # if we have explicit year, treat as similar-year window (feels natural)
+            cmd.similar_year = y
+
+    # limit (optional)
+    m = re.search(r"\b(\d{1,3})\s+(songs|tracks)\b", t)
+    if m:
+        lim = safe_int(m.group(1), DEFAULT_LIMIT)
+        if lim is not None:
+            cmd.limit = clamp(lim, 1, MAX_LIMIT)
+
+    return cmd
+
+
+# ----------------------------
+# Stream scripts
+# ----------------------------
+
+def run_script(path: str) -> bool:
+    p = Path(path)
+    if not p.exists():
+        log(f"ERROR: script missing: {path}")
+        return False
+    if not os.access(path, os.X_OK):
+        log(f"ERROR: script not executable: {path}")
+        return False
+
+    try:
+        res = subprocess.run([path], check=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if res.returncode != 0:
+            log(f"Script failed ({path}): {res.stderr.strip() or res.stdout.strip()}")
+            return False
+        out = (res.stdout.strip() or "").strip()
+        if out:
+            log(out)
+        return True
+    except Exception as e:
+        log(f"ERROR running script {path}: {e}")
+        return False
+
+
+# ----------------------------
+# Whisper transcription
+# ----------------------------
+
+class WhisperTranscriber:
+    def __init__(self) -> None:
+        self.model = None
+
+    def load(self) -> None:
+        from faster_whisper import WhisperModel  # type: ignore
+        log(f"Loading whisper model: {WHISPER_MODEL} ({WHISPER_DEVICE}/{WHISPER_COMPUTE_TYPE})")
+        self.model = WhisperModel(
+            WHISPER_MODEL,
+            device=WHISPER_DEVICE,
+            compute_type=WHISPER_COMPUTE_TYPE,
+        )
+        log("Whisper ready.")
+
+    def transcribe(self, wav_path: str) -> str:
+        if self.model is None:
+            self.load()
+
+        # faster-whisper returns segments generator + info
+        segments, info = self.model.transcribe(
+            wav_path,
+            language="en",
+            vad_filter=True,
+            beam_size=1,
+        )
+        text_parts: List[str] = []
+        for seg in segments:
+            if seg.text:
+                text_parts.append(seg.text.strip())
+        out = " ".join(text_parts).strip()
+        dlog(f"Transcript (lang={getattr(info, 'language', None)}): {out}")
+        return out
+
+
+# ----------------------------
+# Action dispatcher
+# ----------------------------
+
+class VoiceJukebox:
+    def __init__(self) -> None:
+        self.db = LibraryDB(DB_PATH)
+        self.mpv = MPVClient(MPV_SOCKET)
+        self.whisper = WhisperTranscriber()
+        self._running = True
+
+        # warm-up db introspection
+        if not Path(DB_PATH).exists():
+            raise FileNotFoundError(f"SQLite DB not found at: {DB_PATH}")
+        self.db.introspect()
+
+        # cache artists early (non-fatal if missing)
+        try:
+            self.db.get_artists()
+        except Exception as e:
+            log(f"DB artist cache warning: {e}")
+
+    def stop(self) -> None:
+        self._running = False
+
+    def handle(self, cmd: ParsedCommand) -> None:
+        if cmd.intent == "ignore":
+            return
+
+        # Cooldown: prevent repeated identical play commands from resetting track 0
+        now = time.time()
+        sig = (
+            cmd.intent,
+            cmd.artist,
+            cmd.decade,
+            cmd.year_range,
+            cmd.genre,
+            cmd.similar_year,
+            cmd.early_late,
+            cmd.limit,
+        )
+        if not hasattr(self, "_last_cmd_sig"):
+            self._last_cmd_sig = None
+            self._last_cmd_time = 0.0
+
+        if cmd.intent == "play" and sig == self._last_cmd_sig and (now - self._last_cmd_time) < 8.0:
+            dlog("Ignoring repeated play command (cooldown).")
+            return
+
+        self._last_cmd_sig = sig
+        self._last_cmd_time = now
+
+        if cmd.intent in CONTROL_INTENTS:
+            self._handle_control(cmd)
+        else:
+            self._handle_play(cmd)
+
+    def _handle_control(self, cmd: ParsedCommand) -> None:
+        if cmd.intent == "skip":
+            log("Skipping…")
+            self.mpv.next_track()
+            return
+
+        if cmd.intent == "pause":
+            log("Paused.")
+            self.mpv.pause()
+            return
+
+        if cmd.intent == "resume":
+            log("Resumed.")
+            self.mpv.resume()
+            return
+
+        if cmd.intent == "stop":
+            log("Stopping playback and clearing queue.")
+            self.mpv.stop_and_clear()
+            return
+
+        if cmd.intent == "status":
+            title = self.mpv.get_property("media-title")
+            artist = self.mpv.get_property("metadata/by-key/Artist")
+            if title or artist:
+                log(f"Now playing: {artist + ' - ' if artist else ''}{title or ''}".strip())
+            else:
+                log("Status: (couldn’t read now playing — but MPV IPC is reachable if skip works).")
+            return
+
+        if cmd.intent == "help":
+            log("Say things like: 'shuffle', 'play Bowie', 'Bowie 80s', 'early Bowie', 'something like 1984',")
+            log("'pause', 'resume', 'skip', 'volume up', 'set volume 40', 'start stream', 'stop stream'.")
+            return
+
+        if cmd.intent == "start_stream":
+            log("Starting stream…")
+            run_script(START_STREAM_SH)
+            return
+
+        if cmd.intent == "stop_stream":
+            log("Stopping stream…")
+            run_script(STOP_STREAM_SH)
+            return
+
+        if cmd.intent == "stream_status":
+            # Best-effort: check if icecast mount is reachable locally
+            # We won’t hardcode ports here; just confirm scripts exist + MP3 stream path is curl-able if configured.
+            log("Stream status: (best-effort) use your start/stop buttons; or check: curl -I http://127.0.0.1:8001/stream.mp3")
+            return
+
+        if cmd.intent == "mute":
+            log("Muted.")
+            self.mpv.set_volume(0)
+            return
+
+        if cmd.intent == "unmute":
+            log("Unmuted (50).")
+            self.mpv.set_volume(50)
+            return
+
+        if cmd.intent == "volume_set":
+            v = clamp(cmd.volume_set or 50, VOLUME_MIN, VOLUME_MAX)
+            log(f"Volume set to {v}.")
+            self.mpv.set_volume(v)
+            return
+
+        if cmd.intent in ("volume_up", "volume_down"):
+            delta = cmd.volume_delta or (VOLUME_STEP if cmd.intent == "volume_up" else -VOLUME_STEP)
+            newv = self.mpv.adjust_volume(delta)
+            log(f"Volume: {newv}.")
+            return
+
+        if cmd.intent == "quit":
+            log("Stopping voice loop.")
+            self.stop()
+            return
+
+        log(f"Unhandled control intent: {cmd.intent}")
+
+    def _handle_play(self, cmd: ParsedCommand) -> None:
+        # If user said just "play" or "shuffle"
+        # treat as shuffle all with no filters
+        tracks = self.db.get_tracks(
+            artist=cmd.artist,
+            decade=cmd.decade,
+            year_range=cmd.year_range,
+            genre=cmd.genre,
+            similar_year=cmd.similar_year,
+            early_late=cmd.early_late,
+            limit=cmd.limit,
+        )
+
+        if not tracks:
+            desc = self._describe_filters(cmd)
+            log(f"No matches for {desc}. Try fewer filters (e.g., just artist or just decade).")
+            return
+
+        paths = [t.path for t in tracks]
+        desc = self._describe_filters(cmd)
+        log(f"Queueing {len(paths)} tracks ({desc})…")
+        ok = self.mpv.load_playlist(paths, clear_first=True)
+        if not ok:
+            log("Failed to load playlist into MPV (check MPV daemon + IPC socket).")
+
+    def _describe_filters(self, cmd: ParsedCommand) -> str:
+        parts = []
+        if cmd.early_late:
+            parts.append(cmd.early_late)
+        if cmd.genre:
+            parts.append(f"genre '{cmd.genre}'")
+        if cmd.artist:
+            parts.append(f"artist '{cmd.artist}'")
+        if cmd.similar_year is not None:
+            parts.append(f"around {cmd.similar_year}")
+        elif cmd.decade is not None:
+            parts.append(f"{cmd.decade}s")
+        if not parts:
+            return "shuffle all"
+        return ", ".join(parts)
+
+
+# ----------------------------
+# Main loop
+# ----------------------------
+
+def main() -> int:
+    log("Voice Jukebox starting…")
+    log(f"DB: {DB_PATH}")
+    log(f"MPV IPC: {MPV_SOCKET}")
+    log(f"arecord device: {ARECORD_DEVICE} @ {SAMPLE_RATE}Hz ch={CHANNELS} dur={MAX_RECORD_SECONDS}s")
+    if DEBUG:
+        log("DEBUG enabled.")
+
+    jukebox = VoiceJukebox()
+
+    def _sig_handler(signum: int, frame: Any) -> None:
+        log("Signal received, shutting down…")
+        jukebox.stop()
+
+    signal.signal(signal.SIGINT, _sig_handler)
+    signal.signal(signal.SIGTERM, _sig_handler)
+
+    # load whisper once up front (faster response)
+    try:
+        jukebox.whisper.load()
+    except Exception as e:
+        log(f"ERROR: whisper failed to load: {e}")
+        return 2
+
+    log("Listening. Speak a command every few seconds (short phrases work best).")
+    log("Say 'help' for examples, or 'quit' to stop the voice loop.")
+
+    last_artist_refresh = 0.0
+
+    while True:
+        if not jukebox._running:
+            break
+
+        # Refresh artist cache periodically (non-blocking-ish)
+        now = time.time()
+        if now - last_artist_refresh > ARTIST_CACHE_REFRESH_SECONDS:
+            try:
+                jukebox.db.get_artists()
+            except Exception as e:
+                dlog(f"Artist refresh warning: {e}")
+            last_artist_refresh = now
+
+        with tempfile.TemporaryDirectory(prefix="voiceclip_") as td:
+            wav_path = str(Path(td) / "clip.wav")
+
+            ok = record_clip(wav_path)
+            if not ok:
+                time.sleep(0.5)
+                continue
+
+            rms = wav_rms(wav_path)
+            dlog(f"RMS={rms:.1f}")
+            if rms < SILENCE_RMS_THRESHOLD:
+                # Mostly silence; skip transcription
+                continue
+
+            try:
+                text = jukebox.whisper.transcribe(wav_path)
+            except Exception as e:
+                log(f"Transcribe error: {e}")
+                continue
+
+            text_n = normalize_text(text)
+            if not text_n or len(text_n) < 2:
+                continue
+
+            log(f"Heard: {text_n}")
+
+            try:
+                artists = jukebox.db.get_artists()
+                cmd = parse_intent(text_n, artists)
+                jukebox.handle(cmd)
+            except Exception as e:
+                log(f"Command handling error: {e}")
+
+    jukebox.db.close()
+    log("Voice Jukebox stopped.")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

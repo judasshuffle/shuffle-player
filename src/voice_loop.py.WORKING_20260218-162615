@@ -848,14 +848,7 @@ def parse_intent(transcript: str, artists: List[str]) -> ParsedCommand:
     has_trigger = any(re.search(rf"\b{re.escape(w)}\b", t) for w in play_triggers) or has_decade or has_year
 
     if not has_trigger:
-        # If the whole utterance matches an artist, treat it as "play <artist>"
-        a0 = best_match_artist(t, artists)
-        if a0 and len(a0.strip()) >= 3:
-            cmd = ParsedCommand(intent="play")
-            cmd.artist = a0
-            return cmd
-
-        # Otherwise ignore unrelated speech so we don't constantly reload playlists.
+        # Ignore unrelated speech so we don't constantly reload playlists.
         return ParsedCommand(intent="ignore")
 
     cmd = ParsedCommand(intent="play")

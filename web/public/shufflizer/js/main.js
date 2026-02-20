@@ -2,6 +2,7 @@
 import { initAudio } from "./audio.js";
 import { startEngine } from "./engine.js";
 import { startNowPlaying } from "./nowPlaying.js";
+import { initAudioSourceUI } from "./audioSourceUI.js";
 
 const canvas = document.getElementById("c");
 const audioEl = document.getElementById("audio");
@@ -12,6 +13,15 @@ audioEl.load();
 
 const ui = initUI();
 const audio = initAudio(audioEl, { startMuted: ui.state.muted });
+
+
+
+
+
+
+
+initAudioSourceUI(audioEl);
+window.dispatchEvent(new CustomEvent('shufflizer:audio-ready'));
 
 // Now playing (Icecast status JSON)
 ui.state.trackTitle = "";

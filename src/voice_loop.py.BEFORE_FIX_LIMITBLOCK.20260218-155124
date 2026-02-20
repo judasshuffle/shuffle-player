@@ -38,7 +38,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # ----------------------------
 
 DB_PATH = os.getenv("JUKEBOX_DB", "/home/dan/jukebox.db")
-MPV_SOCKET = "/tmp/radio_mp.sock"
+MPV_SOCKET = os.getenv("MPV_IPC_SOCKET", "/tmp/radio_mpv.sock")
 
 START_STREAM_SH = os.getenv("START_STREAM_SH", "/home/dan/start_stream.sh")
 STOP_STREAM_SH = os.getenv("STOP_STREAM_SH", "/home/dan/stop_stream.sh")
@@ -275,37 +275,28 @@ class MPVClient:
         return newv
 
     def load_playlist(self, paths: Sequence[str], clear_first: bool = True) -> bool:
-        # Hard reset so we immediately switch away from whatever is currently playing
-        self.command("stop")
-
         if clear_first:
             self.command("playlist-clear")
 
         ok_any = False
-        first_loaded = False
-
-        for p in paths:
+        for i, p in enumerate(paths):
             if not p:
                 continue
+            # ensure exists (avoid mpv spam)
             if not Path(p).exists():
                 dlog(f"Missing path skipped: {p}")
                 continue
-
-            if not first_loaded:
-                resp = self.command("loadfile", p, "replace")
-                first_loaded = (resp.get("error") == "success")
-                ok_any = ok_any or first_loaded
-            else:
-                resp = self.command("loadfile", p, "append")
-                if resp.get("error") == "success":
-                    ok_any = True
+            mode = "replace" if (i == 0 and not clear_first) else "append"
+            # if we cleared first, use "append" for all and then start playing
+            resp = self.command("loadfile", p, "append")
+            if resp.get("error") == "success":
+                ok_any = True
 
         if ok_any:
-            self.command("playlist-play-index", 0)
             self.set_property("pause", False)
-
+            # ensure playback starts from first item
+            self.command("playlist-play-index", 0)
         return ok_any
-
 
 
 # ----------------------------
@@ -848,14 +839,7 @@ def parse_intent(transcript: str, artists: List[str]) -> ParsedCommand:
     has_trigger = any(re.search(rf"\b{re.escape(w)}\b", t) for w in play_triggers) or has_decade or has_year
 
     if not has_trigger:
-        # If the whole utterance matches an artist, treat it as "play <artist>"
-        a0 = best_match_artist(t, artists)
-        if a0 and len(a0.strip()) >= 3:
-            cmd = ParsedCommand(intent="play")
-            cmd.artist = a0
-            return cmd
-
-        # Otherwise ignore unrelated speech so we don't constantly reload playlists.
+        # Ignore unrelated speech so we don't constantly reload playlists.
         return ParsedCommand(intent="ignore")
 
     cmd = ParsedCommand(intent="play")
@@ -925,6 +909,8 @@ def parse_intent(transcript: str, artists: List[str]) -> ParsedCommand:
         else:
             return ParsedCommand(intent="ignore")
 
+    # limit (optional)
+    m = re.search(...)
 
     # limit (optional)
     m = re.search(r"\b(\d{1,3})\s+(songs|tracks)\b", t)
