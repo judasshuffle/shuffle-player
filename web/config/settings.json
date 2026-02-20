@@ -1,0 +1,12 @@
+{
+  "audio": {
+    "mode": "stream",
+    "streamUrl": "/stream.mp3",
+    "customUrl": ""
+  },
+  "visual": {
+    "oledSafe": true,
+    "hideTrackText": false,
+    "hideOverlayLabels": false
+  }
+}
