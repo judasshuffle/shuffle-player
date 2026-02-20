@@ -18,7 +18,10 @@ Designed to be robust:
 from __future__ import annotations
 
 import json
+import queue
 import os
+import select
+import threading
 import re
 import shlex
 import signal
@@ -1176,6 +1179,59 @@ def main() -> int:
         log("DEBUG enabled.")
 
     jukebox = VoiceJukebox()
+    jukebox._fifo_q = queue.SimpleQueue()
+    jukebox._artists_cache = []  # shared snapshot for FIFO thread
+
+    # Dashboard/FIFO control (non-blocking): allows web UI to send commands like "shuffle all"
+    def _fifo_loop() -> None:
+        fifo = "/tmp/shuffle_cmd.fifo"
+        try:
+            if not os.path.exists(fifo):
+                os.mkfifo(fifo, 0o666)
+        except Exception as e:
+            log(f"FIFO init error: {e}")
+            return
+
+        # Keep FIFO open persistently:
+        # - rfd keeps us as a reader so web writes (O_WRONLY|O_NONBLOCK) won't ENXIO
+        # - wfd dummy writer prevents EOF when no external writer is connected
+        try:
+            rfd = os.open(fifo, os.O_RDONLY | os.O_NONBLOCK)
+            wfd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        except Exception as e:
+            log(f"FIFO open error: {e}")
+            return
+
+        try:
+            with os.fdopen(rfd, "r", encoding="utf-8", errors="replace") as f:
+                while jukebox._running:
+                    r, _, _ = select.select([f], [], [], 0.5)
+                    if not r:
+                        continue
+                    line = f.readline()
+                    if not line:
+                        # No writer data yet; keep waiting without closing/reopening
+                        time.sleep(0.1)
+                        continue
+
+                    text_n = normalize_text(line.strip())
+                    if not text_n:
+                        continue
+
+                    log(f"FIFO: {text_n}")
+                    try:
+                        jukebox._fifo_q.put(text_n)
+                    except Exception as e:
+                        log(f"FIFO enqueue error: {e}")
+        except Exception as e:
+            log(f"FIFO loop error: {e}")
+        finally:
+            try:
+                os.close(wfd)
+            except Exception:
+                pass
+
+    threading.Thread(target=_fifo_loop, daemon=True).start()
 
     def _sig_handler(signum: int, frame: Any) -> None:
         log("Signal received, shutting down…")
@@ -1200,11 +1256,24 @@ def main() -> int:
         if not jukebox._running:
             break
 
+
+        # Drain FIFO commands (run in main thread to keep SQLite/MPV thread-safe)
+        try:
+            while True:
+                text_n = jukebox._fifo_q.get_nowait()
+                log(f"FIFO->MAIN: {text_n}")
+                artists = jukebox.db.get_artists()
+                cmd = parse_intent(text_n, artists)
+                jukebox.handle(cmd)
+        except Exception:
+            pass
+
+
         # Refresh artist cache periodically (non-blocking-ish)
         now = time.time()
         if now - last_artist_refresh > ARTIST_CACHE_REFRESH_SECONDS:
             try:
-                jukebox.db.get_artists()
+                jukebox._artists_cache = jukebox.db.get_artists()
             except Exception as e:
                 dlog(f"Artist refresh warning: {e}")
             last_artist_refresh = now
@@ -1237,6 +1306,7 @@ def main() -> int:
 
             try:
                 artists = jukebox.db.get_artists()
+                jukebox._artists_cache = artists
                 cmd = parse_intent(text_n, artists)
                 log(f"DEBUG CMD intent={getattr(cmd,'intent',None)} artist={getattr(cmd,'artist',None)} decade={getattr(cmd,'decade',None)} similar_year={getattr(cmd,'similar_year',None)} genre={getattr(cmd,'genre',None)} early_late={getattr(cmd,'early_late',None)} limit={getattr(cmd,'limit',None)}")
                 jukebox.handle(cmd)

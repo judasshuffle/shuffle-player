@@ -37,8 +37,14 @@ class Handler(SimpleHTTPRequestHandler):
 
         if u.path == "/api/cmd/shuffle":
             try:
-                with open("/tmp/shuffle_cmd.fifo", "w", encoding="utf-8") as f:
-                    f.write("shuffle all\n")
+                fifo = "/tmp/shuffle_cmd.fifo"
+                msg = "shuffle all\n".encode("utf-8")
+
+                fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+                try:
+                    os.write(fd, msg)
+                finally:
+                    os.close(fd)
                 return self._json({"ok": True})
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)}, 500)
