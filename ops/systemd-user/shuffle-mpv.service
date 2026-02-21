@@ -1,0 +1,17 @@
+[Unit]
+Description=Shuffle MPV Radio Engine (user)
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire.service pipewire-pulse.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=2
+
+# make sure socket is not stale
+ExecStartPre=/bin/bash -lc 'rm -f /tmp/radio_mpv.sock'
+
+ExecStart=/usr/bin/mpv --no-video --input-ipc-server=/tmp/radio_mpv.sock --idle=yes --loop-playlist=inf --shuffle /mnt/lossless
+
+[Install]
+WantedBy=default.target

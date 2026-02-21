@@ -1,0 +1,15 @@
+[Unit]
+Description=Shuffle Radio audio routing (radio_sink + loopback to DragonFly)
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Create the null sink if it doesn't exist
+ExecStart=/bin/sh -lc 'pactl list short sinks | awk "{print \$2}" | grep -qx radio_sink || pactl load-module module-null-sink sink_name=radio_sink sink_properties=device.description=ShuffleRadio'
+
+# Create loopback from radio_sink.monitor -> DragonFly if missing
+ExecStart=/bin/sh -lc 'pactl list short modules | grep -q "module-loopback.*radio_sink.monitor.*alsa_output.usb-AudioQuest_AudioQuest_DragonFly_Red_v1.0_AQDFRD0100103483-01.analog-stereo" || pactl load-module module-loopback source=radio_sink.monitor sink=alsa_output.usb-AudioQuest_AudioQuest_DragonFly_Red_v1.0_AQDFRD0100103483-01.analog-stereo latency_msec=80'
+

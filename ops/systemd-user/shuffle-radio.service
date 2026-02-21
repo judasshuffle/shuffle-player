@@ -1,0 +1,17 @@
+[Unit]
+Description=Shuffle Radio Encoder (user)
+
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=2
+
+EnvironmentFile=/etc/shuffle-radio.env
+
+ExecStart=/usr/local/bin/shuffle-radio-ffmpeg.sh
+
+[Install]
+WantedBy=default.target

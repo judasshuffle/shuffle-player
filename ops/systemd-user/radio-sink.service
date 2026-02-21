@@ -1,0 +1,12 @@
+[Unit]
+Description=Create radio_sink virtual audio device
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pactl load-module module-null-sink sink_name=radio_sink sink_properties=device.description=radio_sink
+RemainAfterExit=true
+
+[Install]
+WantedBy=default.target
