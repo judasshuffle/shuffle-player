@@ -41,7 +41,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 # ----------------------------
 
 DB_PATH = os.getenv("JUKEBOX_DB", "/home/dan/jukebox.db")
-MPV_SOCKET = "/tmp/radio_mp.sock"
+MPV_SOCKET = "/tmp/radio_mpv.sock"
 
 START_STREAM_SH = os.getenv("START_STREAM_SH", "/home/dan/start_stream.sh")
 STOP_STREAM_SH = os.getenv("STOP_STREAM_SH", "/home/dan/stop_stream.sh")
