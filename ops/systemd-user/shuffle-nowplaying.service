@@ -1,0 +1,13 @@
+[Unit]
+Description=Shuffle Now Playing JSON writer (user)
+After=shuffle-mpv.service
+Wants=shuffle-mpv.service
+
+[Service]
+Type=simple
+Restart=on-failure
+RestartSec=2
+ExecStart=/usr/bin/python3 /home/dan/shuffle-player/tools_nowplaying.py
+
+[Install]
+WantedBy=default.target
