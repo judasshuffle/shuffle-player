@@ -1,0 +1,48 @@
+﻿:root {
+  --green: #00ff66;
+  --panel: rgba(0,0,0,0.60);
+}
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+#c { display:block; width:100vw; height:100vh; }
+
+#ui {
+  position: fixed;
+  top: 10px;
+  left: 10px;
+  background: var(--panel);
+  padding: 10px;
+  border: 1px solid var(--green);
+  color: var(--green);
+  min-width: 260px;
+  user-select: none;
+}
+
+#ui hr { border: 0; border-top: 1px solid rgba(0,255,102,0.35); margin: 10px 0; }
+
+#ui .row {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+}
+
+#ui label { font-size: 12px; }
+#ui input[type="range"] { width: 160px; }
+#ui select { width: 170px; }
+
+#audio {
+  position: fixed;
+  bottom: 10px;
+  left: 10px;
+  width: 320px;
+  opacity: 0.85;
+}

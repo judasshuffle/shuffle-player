@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Shufflizer</title>
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <div id="ui">
+    <div class="row">
+      <label>Bank</label>
+      <select id="bank"></select>
+    </div>
+    <div class="row">
+      <label>Preset</label>
+      <select id="preset"></select>
+    </div>
+
+    <div class="row">
+      <label><input id="muted" type="checkbox" checked /> Muted (visuals still live)</label>
+    </div>
+    <div class="row">
+      <label><input id="glow" type="checkbox" /> Glow</label>
+    </div>
+    <div class="row">
+      <label><input id="phosphor" type="checkbox" checked /> Phosphor</label>
+    </div>
+
+    
+    <hr />
+
+    <div class="row"><strong>Overlays</strong></div>
+
+    <div class="row">
+      <label><input id="ovHub" type="checkbox" checked /> Hub wave ring (smooth)</label>
+    </div>
+    <div class="row">
+      <label><input id="ovBig" type="checkbox" checked /> Outer wave ring (thick)</label>
+    </div>
+    <div class="row">
+      <label><input id="ovSpoke" type="checkbox" checked /> Spoke wave</label>
+    </div>
+
+    <div class="row"><label>Throb</label><input id="ovThrob" type="range" min="0" max="1.5" step="0.01" value="0.75"></div>
+
+    <div class="row"><label>Hub size</label><input id="ovHubR" type="range" min="10" max="400" step="1" value="90"></div>
+    <div class="row"><label>Hub wobble</label><input id="ovHubAmp" type="range" min="0" max="200" step="1" value="22"></div>
+    <div class="row"><label>Hub rot</label><input id="ovHubRot" type="range" min="-2" max="2" step="0.01" value="0.35"></div>
+
+    <div class="row"><label>Outer size</label><input id="ovBigR" type="range" min="60" max="900" step="1" value="320"></div>
+    <div class="row"><label>Outer wobble</label><input id="ovBigAmp" type="range" min="0" max="400" step="1" value="85"></div>
+    <div class="row"><label>Outer rot</label><input id="ovBigRot" type="range" min="-2" max="2" step="0.01" value="-0.18"></div>
+
+    <div class="row"><label>Spoke len</label><input id="ovSpokeLen" type="range" min="100" max="2000" step="5" value="900"></div>
+    <div class="row"><label>Spoke wobble</label><input id="ovSpokeAmp" type="range" min="0" max="300" step="1" value="35"></div>
+    <div class="row"><label>Spoke rot</label><input id="ovSpokeRot" type="range" min="-2" max="2" step="0.01" value="0.55"></div>
+
+
+<hr />
+
+    <div class="row"><label>Spin</label><input id="spin" type="range" min="0" max="5" step="0.1" value="1.5"></div>
+    <div class="row"><label>Trail</label><input id="trail" type="range" min="0.01" max="0.3" step="0.01" value="0.08"></div>
+    <div class="row"><label>Zap</label><input id="zap" type="range" min="0" max="3" step="0.1" value="1"></div>
+    <div class="row"><label>Spawn</label><input id="spawn" type="range" min="0" max="10" step="1" value="2"></div>
+    <div class="row"><label>Shockwave</label><input id="shockwave" type="range" min="0" max="2" step="0.05" value="1"></div>
+    <div class="row"><label>Beat Thresh</label><input id="beatThresh" type="range" min="1.05" max="1.8" step="0.01" value="1.25"></div>
+  </div>
+
+  <audio
+    id="audio"
+    crossorigin="anonymous"
+    controls
+  ></audio>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
