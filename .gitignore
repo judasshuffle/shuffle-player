@@ -23,3 +23,6 @@ asr-env/
 
 # OS junk
 .DS_Store
+
+*.WORKING
+*.WORKING_*
