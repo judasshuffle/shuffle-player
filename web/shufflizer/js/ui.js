@@ -592,15 +592,22 @@ if (document.readyState === "loading") {
     retryAttach();
   }
 })();
-
-
 // STREAM_OVERRIDE_UI
 (function(){
-  function addStreamOverrideUI(){
-    const panel = document.querySelector(".menu") || document.body;
-    if (!panel) return;
+  const KEY = "shufflizer.stream.override";
 
-    if (document.getElementById("streamOverrideInput")) return;
+  function findPaletteSelect(){
+    const sels = Array.from(document.querySelectorAll("select"));
+    // your palette select lives in a wrapper whose text includes "Palette"
+    const hit = sels.find(sel => sel.parentElement && /palette/i.test(sel.parentElement.textContent || ""));
+    return hit || null;
+  }
+
+  function addStreamOverrideUI(){
+    const paletteSel = findPaletteSelect();
+    if (!paletteSel) return false;
+
+    if (document.getElementById("streamOverrideInput")) return true;
 
     const wrap = document.createElement("div");
     wrap.style.marginTop = "10px";
@@ -613,29 +620,42 @@ if (document.readyState === "loading") {
     const input = document.createElement("input");
     input.type = "text";
     input.id = "streamOverrideInput";
-    input.placeholder = "https://example.com/stream.mp3";
+    input.placeholder = "Leave blank for default. Example: https://example.com/stream.mp3";
     input.style.width = "100%";
     input.style.marginTop = "4px";
-    input.value = localStorage.getItem("shufflizer.stream.override") || "";
+    try { input.value = localStorage.getItem(KEY) || ""; } catch(e) {}
 
     input.addEventListener("change", () => {
-      const v = input.value.trim();
-      if (v) {
-        localStorage.setItem("shufflizer.stream.override", v);
-      } else {
-        localStorage.removeItem("shufflizer.stream.override");
-      }
+      const v = (input.value || "").trim();
+      try {
+        if (v) localStorage.setItem(KEY, v);
+        else localStorage.removeItem(KEY);
+      } catch(e) {}
       alert("Stream URL saved. Reload page to apply.");
     });
 
     wrap.appendChild(label);
     wrap.appendChild(input);
-    panel.appendChild(wrap);
+
+    // Put it right under the Palette selector
+    paletteSel.insertAdjacentElement("afterend", wrap);
+    return true;
+  }
+
+  function retryAttach(){
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (addStreamOverrideUI()){
+        clearInterval(iv);
+      } else if (Date.now() - t0 > 3000){
+        clearInterval(iv);
+      }
+    }, 120);
   }
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", addStreamOverrideUI);
+    document.addEventListener("DOMContentLoaded", retryAttach);
   } else {
-    addStreamOverrideUI();
+    retryAttach();
   }
 })();
