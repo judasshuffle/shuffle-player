@@ -731,6 +731,12 @@ if (document.readyState === "loading") {
       }catch(e){
         alert("Skip failed: " + e);
       }finally{
+        // pulse effect on successful skip
+        try{
+          btn.classList.add("shuf-skip-pulse");
+          setTimeout(()=>btn.classList.remove("shuf-skip-pulse"), 600);
+        }catch(e){}
+
         btn.textContent = old;
         btn.disabled = false;
       }
@@ -764,4 +770,24 @@ if (document.readyState === "loading") {
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", retry);
   else retry();
+})();
+
+
+// SKIP_PULSE_STYLE
+(function(){
+  if (document.getElementById("shufSkipPulseStyle")) return;
+  const st = document.createElement("style");
+  st.id = "shufSkipPulseStyle";
+  st.textContent = `
+  @keyframes shufSkipPulse {
+    0% { transform: scale(1); }
+    40% { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+  .shuf-skip-pulse {
+    animation: shufSkipPulse 0.6s ease-out;
+    box-shadow: 0 0 18px var(--shuf-primary, #0f6);
+  }
+  `;
+  document.head.appendChild(st);
 })();
