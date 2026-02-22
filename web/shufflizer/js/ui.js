@@ -32,6 +32,8 @@ export function initUI() {
     glow: document.getElementById("glow"),
     phosphor: document.getElementById("phosphor"),
 
+    titleParticles: document.getElementById("titleParticles"),
+
     spin: document.getElementById("spin"),
     trail: document.getElementById("trail"),
     zap: document.getElementById("zap"),
@@ -81,6 +83,7 @@ export function initUI() {
     state.muted = !!els.muted.checked;
     state.glow = !!els.glow.checked;
     state.phosphor = !!els.phosphor.checked;
+    if (els.titleParticles) state.titleParticles = !!els.titleParticles.checked;
 
     state.spin = parseFloat(els.spin.value);
     state.trail = parseFloat(els.trail.value);

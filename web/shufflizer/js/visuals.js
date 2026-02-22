@@ -7,6 +7,23 @@
   return Math.sqrt(sum / byteArr.length);
 }
 
+// TITLE_PARTICLE_PLUMBING
+let _spawnTitleParticleImpl = null;
+
+export function setTitleParticleSpawner(fn) {
+  _spawnTitleParticleImpl = fn;
+}
+
+export function spawnTitleParticle(text) {
+  if (typeof _spawnTitleParticleImpl === "function") {
+    _spawnTitleParticleImpl(text);
+    return true;
+  }
+  console.warn("spawnTitleParticle: spawner not armed yet (initVisuals has not registered it)");
+  return false;
+}
+
+
 export function initVisuals(canvas, analyser, uiState) {
   const ctx = canvas.getContext("2d", { alpha: false });
 
@@ -26,6 +43,28 @@ export function initVisuals(canvas, analyser, uiState) {
 
   let angle = 0;
   let shapes = [];
+  let texts = [];
+
+
+// TITLE_PARTICLE_IMPL
+  setTitleParticleSpawner((text) => {
+    if (!text) return;
+    const t = String(text).trim();
+    if (!t) return;
+
+    texts.push({
+      text: t.length > 44 ? t.slice(0, 41) + "…" : t,
+      angle: Math.random() * Math.PI * 2,
+      radius: 30 + Math.random() * 40,
+      spin: (Math.random() - 0.5) * 0.08,
+      life: 1.0,
+      drift: 0.6 + Math.random() * 1.2,
+      size: 18 + Math.random() * 10,
+    });
+
+    if (texts.length > 12) texts.splice(0, texts.length - 12);
+  });
+
   let rings = [];
 
   let energyAvg = 0;
@@ -155,6 +194,40 @@ export function initVisuals(canvas, analyser, uiState) {
       ctx.restore();
 
       if (s.life <= 0) shapes.splice(i, 1);
+    }
+
+
+    // TEXT_PARTICLES_LOOP
+    for (let i = texts.length - 1; i >= 0; i--) {
+      const t = texts[i];
+      t.angle += t.spin + energy * 0.06;
+      t.radius += (energy * 8 + 1.2) * t.drift;
+      t.life -= 0.008;
+
+      const x = cx + Math.cos(t.angle) * t.radius;
+      const y = cy + Math.sin(t.angle) * t.radius;
+
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, t.life);
+
+      if (glowOn) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = ctx.strokeStyle;
+      }
+
+      ctx.font = `${Math.floor(t.size)}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      ctx.lineWidth = 3;
+      ctx.strokeText(t.text, x, y);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fillText(t.text, x, y);
+
+      ctx.restore();
+
+      if (t.life <= 0) texts.splice(i, 1);
     }
 
     for (let i = rings.length - 1; i >= 0; i--) {

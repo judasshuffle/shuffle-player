@@ -19,7 +19,19 @@
       <select id="preset"></select>
     </div>
 
-    <div class="row">
+    
+    <div class="row np-row">
+      <div id="npTextUi" class="npTextUi">…</div>
+    </div>
+
+  <audio
+    id="audio"
+    crossorigin="anonymous"
+    controls
+  
+    src="http://192.168.68.57:8001/stream.mp3"
+  ></audio>
+<div class="row">
       <label><input id="muted" type="checkbox" checked /> Muted (visuals still live)</label>
     </div>
     <div class="row">
@@ -33,6 +45,11 @@
     <hr />
 
     <div class="row"><strong>Overlays</strong></div>
+
+    <div class="row">
+      <label><input id="titleParticles" type="checkbox" checked /> Title bursts</label>
+    </div>
+
 
     <div class="row">
       <label><input id="ovHub" type="checkbox" checked /> Hub wave ring (smooth)</label>
@@ -68,12 +85,6 @@
     <div class="row"><label>Shockwave</label><input id="shockwave" type="range" min="0" max="2" step="0.05" value="1"></div>
     <div class="row"><label>Beat Thresh</label><input id="beatThresh" type="range" min="1.05" max="1.8" step="0.01" value="1.25"></div>
   </div>
-
-  <audio
-    id="audio"
-    crossorigin="anonymous"
-    controls
-  ></audio>
 
   <script type="module" src="/js/main.js"></script>
 </body>

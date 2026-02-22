@@ -179,6 +179,86 @@ export function startEngine(canvas, analyser, uiState) {
   const freq = new Uint8Array(analyser.frequencyBinCount);
   const wave = new Uint8Array(analyser.fftSize);
 
+
+  // TITLE_PARTICLES_ENGINE
+  const titleParticles = [];
+  let _lastTitle = "";
+  let _nextTitlePing = 0;
+  let _titleDebugUntil = 0;
+
+  function spawnTitleParticle(text) {
+    const t = (text || "").toString().trim();
+    if (!t) return;
+
+    titleParticles.push({
+      text: t.length > 44 ? t.slice(0, 41) + "…" : t,
+      angle: Math.random() * Math.PI * 2,
+      radius: 40 + Math.random() * 80,
+      spin: 0.02 + Math.random() * 0.03,
+      life: 1.0,
+      drift: 0.8 + Math.random() * 1.4,
+      vr: (Math.random() - 0.5) * 1.8,
+      va: 0.010 + Math.random() * 0.018,
+      size: 32 + Math.random() * 20,
+    });
+
+    if (titleParticles.length > 10) titleParticles.splice(0, titleParticles.length - 10);
+  }
+
+  function drawTitleParticles(ctx, w, h, energy, glowOn) {
+    if (!titleParticles.length) return;
+    const cx = w / 2, cy = h / 2;
+
+    ctx.save();
+    for (let i = titleParticles.length - 1; i >= 0; i--) {
+      const p = titleParticles[i];
+      p.angle += (p.va ?? 0.02) + energy * 0.010;
+      p.vr = (p.vr ?? 0) + (energy * 0.10 - 0.02);   // audio pushes out a bit
+      p.vr += (Math.random() - 0.5) * 0.12;           // gentle wander
+      p.radius += p.vr;
+
+      // soft spring toward a target orbit (keeps it floaty, not pinned)
+      const target = 420;
+      p.vr += (target - p.radius) * 0.00035;
+
+      // damping
+      p.vr *= 0.99;
+      
+      p.life -= 0.0008;
+
+      const x = cx + Math.cos(p.angle) * p.radius;
+      const y = cy + Math.sin(p.angle) * p.radius;
+
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.life);
+
+      if (glowOn) {
+        ctx.globalCompositeOperation = "lighter";
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = "rgba(0,255,102,0.95)";
+      }
+
+      ctx.font = `${Math.floor(p.size)}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // neon-ish
+      ctx.strokeStyle = "rgba(0,255,102,0.95)";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 5;
+
+      ctx.translate(x, y);
+      ctx.rotate(p.angle); // rotate like the pentagon vibe
+      ctx.strokeText(p.text, 0, 0);
+      ctx.fillText(p.text, 0, 0);
+
+      ctx.restore();
+
+      if (p.life <= 0) titleParticles.splice(i, 1);
+    }
+    ctx.restore();
+  }
+
   let energyAvg = 0;
   let beatCooldown = 0;
 
@@ -227,8 +307,42 @@ export function startEngine(canvas, analyser, uiState) {
 
     fx.render({ ctx, w, h, t, dt, audio, globals, params, state: effectState });
 
-    // Overlay: now playing
-    drawNowPlaying(ctx, w, h, globals.trackTitle, globals.glow);
+
+    // TITLE_PARTICLES_ENGINE: spawn on title change
+    if (params.titleParticles !== false && globals.trackTitle && globals.trackTitle !== _lastTitle) {
+      _lastTitle = globals.trackTitle;
+      _nextTitlePing = t + 60000; // 60s
+      spawnTitleParticle(globals.trackTitle);
+      _titleDebugUntil = t + 2000;
+    }
+
+    // TITLE_PARTICLES_ENGINE: draw on top
+    if (params.titleParticles !== false) drawTitleParticles(ctx, w, h, energy, globals.glow);
+
+    // TITLE_PARTICLES_ENGINE: periodic ping
+    if (params.titleParticles !== false && globals.trackTitle && t >= _nextTitlePing) {
+      _nextTitlePing = t + 60000; // 60s
+      for (let i = 0; i < 3; i++) {
+        spawnTitleParticle(globals.trackTitle);
+      }
+    }
+
+    // TITLE_PARTICLES_DEBUG_FLASH
+    if (t < _titleDebugUntil) {
+      ctx.save();
+      ctx.globalAlpha = 0.9;
+      ctx.font = "22px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.strokeStyle = "rgba(0,255,102,0.95)";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 3;
+      ctx.strokeText("TRACKTITLE CHANGED", w/2, h/2);
+      ctx.fillText("TRACKTITLE CHANGED", w/2, h/2);
+      ctx.restore();
+    }
+
+    // Overlay: now playing (disabled; title uses particles)
 
     // Global overlays
     drawOverlays(ctx, w, h, t, audio, uiState);

@@ -46,3 +46,32 @@ html, body {
   width: 320px;
   opacity: 0.85;
 }
+
+/* SHUFFLIZER_AUTOHIDE_UI */
+body.ui-hidden #ui {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+}
+
+#ui {
+  transition: opacity 240ms ease, transform 240ms ease;
+}
+
+
+/* SHUFFLIZER_AUDIO_IN_UI */
+#ui audio#audio {
+  width: 100%;
+  display: block;
+  margin-top: 10px;
+  position: static !important; /* override any previous fixed positioning */
+}
+
+#ui .npTextUi {
+  font-weight: 700;
+  opacity: 0.95;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

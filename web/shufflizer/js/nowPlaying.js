@@ -1,48 +1,38 @@
-﻿function pickSource(src) {
-  if (!src) return null;
-  if (Array.isArray(src)) return src[0] ?? null;
-  return src;
-}
-
-function extractTitle(source) {
-  if (!source) return "";
-  // common Icecast fields
-  return (
-    source.title ||
-    source.yp_currently_playing ||
-    source.server_name ||
-    source.description ||
-    ""
-  );
-}
-
-export function startNowPlaying({ host, intervalMs = 2000, onUpdate } = {}) {
+export function startNowPlaying({ intervalMs = 1000, onUpdate } = {}) {
   let stopped = false;
-  let last = "";
+  let lastTs = null;
 
   async function tick() {
     if (stopped) return;
 
     try {
-      const url = `http://${host}:8001/status-json.xsl?_=${Date.now()}`;
-      const r = await fetch(url, { cache: "no-store" });
+      // Same-origin (served by :8090), avoids CORS
+      const r = await fetch(`/nowplaying.json?_=${Date.now()}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
 
-      const src = pickSource(j?.icestats?.source);
-      const title = extractTitle(src).trim();
+      const ts = j?.ts ?? null;
+      const artist = (j?.artist ?? "").toString().trim();
+      const title  = (j?.title  ?? "").toString().trim();
 
-      if (title && title !== last) {
-        last = title;
-        onUpdate?.(title);
+      const text = (artist && title) ? `${artist} — ${title}` : (title || artist || "");
+
+      // Fire when ts changes (track change), or first time we get data
+      if (ts !== null && ts !== lastTs) {
+        lastTs = ts;
+        if (text) onUpdate?.(text);
+      } else if (lastTs === null && text) {
+        // Initial fill
+        lastTs = ts;
+        onUpdate?.(text);
       }
-    } catch {
-      // ignore; we'll try again next tick
+    } catch (e) {
+      console.log('[nowplaying] fetch failed', e);
     } finally {
       if (!stopped) setTimeout(tick, intervalMs);
     }
   }
 
   tick();
-
   return () => { stopped = true; };
 }
