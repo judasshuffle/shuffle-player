@@ -315,7 +315,7 @@ export function startEngine(canvas, analyser, uiState) {
       _nextTitlePing = t + 60000; // 60s
       titleParticles.length = 0;
       spawnTitleParticle(globals.trackTitle);
-      _titleDebugUntil = t + 2000;
+      // _titleDebugUntil debug disabled
     }
 
     // TITLE_PARTICLES_ENGINE: draw on top
@@ -327,21 +327,6 @@ export function startEngine(canvas, analyser, uiState) {
       for (let i = 0; i < 3; i++) {
         spawnTitleParticle(globals.trackTitle);
       }
-    }
-
-    // TITLE_PARTICLES_DEBUG_FLASH
-    if (t < _titleDebugUntil) {
-      ctx.save();
-      ctx.globalAlpha = 0.9;
-      ctx.font = "22px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.strokeStyle = ((window.SHUF && window.SHUF.primary) ? window.SHUF.primary : window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
-      ctx.fillStyle = ctx.strokeStyle;
-      ctx.lineWidth = 3;
-      ctx.strokeText("TRACKTITLE CHANGED", w/2, h/2);
-      ctx.fillText("TRACKTITLE CHANGED", w/2, h/2);
-      ctx.restore();
     }
 
     // Overlay: now playing (disabled; title uses particles)
