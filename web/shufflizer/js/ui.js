@@ -824,9 +824,9 @@ if (document.readyState === "loading") {
 
     const slider = document.createElement("input");
     slider.type = "range";
-    slider.min = "0.50";
-    slider.max = "3.00";
-    slider.step = "0.05";
+    slider.min = "0.00";
+    slider.max = "10.00";
+    slider.step = "0.10";
 
     const val = document.createElement("span");
     val.style.fontSize = "12px";
@@ -835,7 +835,7 @@ if (document.readyState === "loading") {
     val.style.textAlign = "right";
 
     function set(v){
-      const n = Math.max(0.25, Math.min(4.0, Number(v) || 1.0));
+      const n = Math.max(0.0, Math.min(10.0, Number(v) || 0.0));
       slider.value = String(n.toFixed(2));
       val.textContent = n.toFixed(2) + "×";
       try { localStorage.setItem(KEY, String(n)); } catch(e) {}

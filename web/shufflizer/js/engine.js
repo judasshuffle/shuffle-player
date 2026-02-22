@@ -39,7 +39,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
   const throb = __clamp(energy * (ui.ovThrob ?? 0), 0, 1.25);
 
     // Waveform sensitivity (multiplies amplitude of ring + spoke wave)
-    const waveGain = __clamp((ui.waveGain ?? 1.0), 0.25, 4.0);
+    const waveGain = __clamp((ui.waveGain ?? 1.0), 0.0, 10.0);
 
   // independent angles
   __ovHubAng   += (ui.ovHubRot   ?? 0) * 0.0025;
