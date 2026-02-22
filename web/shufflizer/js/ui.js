@@ -659,3 +659,109 @@ if (document.readyState === "loading") {
     retryAttach();
   }
 })();
+
+
+// SKIP_TRACK_UI
+(function(){
+  const KEYNAME = "shufflizer.control.key";
+
+  function findPaletteSelect(){
+    const sels = Array.from(document.querySelectorAll("select"));
+    const hit = sels.find(sel => sel.parentElement && /palette/i.test(sel.parentElement.textContent || ""));
+    return hit || null;
+  }
+
+  function addSkipUI(){
+    const paletteSel = findPaletteSelect();
+    if (!paletteSel) return false;
+
+    if (document.getElementById("shufSkipTrackBtn")) return true;
+
+    const wrap = document.createElement("div");
+    wrap.id = "shufSkipWrap";
+    wrap.style.marginTop = "10px";
+    wrap.style.display = "flex";
+    wrap.style.gap = "8px";
+    wrap.style.alignItems = "center";
+
+    const btn = document.createElement("button");
+    btn.id = "shufSkipTrackBtn";
+    btn.textContent = "⏭ Skip track";
+    btn.style.padding = "8px 10px";
+    btn.style.borderRadius = "10px";
+    btn.style.border = "1px solid rgba(255,255,255,.14)";
+    btn.style.background = "transparent";
+    btn.style.color = "inherit";
+    btn.style.cursor = "pointer";
+
+    const small = document.createElement("button");
+    small.textContent = "Set key";
+    small.style.padding = "8px 10px";
+    small.style.borderRadius = "10px";
+    small.style.border = "1px solid rgba(255,255,255,.14)";
+    small.style.background = "transparent";
+    small.style.color = "inherit";
+    small.style.cursor = "pointer";
+    small.title = "Stores your control key in this browser so Skip works (needed for public tunnel)";
+
+    async function doSkip(){
+      const key = (localStorage.getItem(KEYNAME) || "").trim();
+      if (!key){
+        alert("No control key set in this browser yet. Click 'Set key' first.");
+        return;
+      }
+    }
+
+    // JS-safe (avoid accidental Python tokens)
+    btn.addEventListener("click", async () => {
+      const key = (localStorage.getItem(KEYNAME) || "").trim();
+      if (!key){
+        alert("No control key set in this browser yet. Click 'Set key' first.");
+        return;
+      }
+      btn.disabled = true;
+      const old = btn.textContent;
+      btn.textContent = "Skipping…";
+      try{
+        const r = await fetch("/control/next", { method: "POST", headers: { "X-Shufflizer-Key": key }});
+        if (!r.ok){
+          const t = await r.text();
+          alert("Skip failed: " + r.status + " " + t);
+        }
+      }catch(e){
+        alert("Skip failed: " + e);
+      }finally{
+        btn.textContent = old;
+        btn.disabled = false;
+      }
+    });
+
+    small.addEventListener("click", () => {
+      const cur = (localStorage.getItem(KEYNAME) || "").trim();
+      const v = prompt("Enter control key for Skip (saved in this browser only):", cur);
+      if (v === null) return;
+      const t = (v || "").trim();
+      if (t) localStorage.setItem(KEYNAME, t);
+      else localStorage.removeItem(KEYNAME);
+      alert("Saved. (This does not change the server key file.)");
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(small);
+
+    // Put it under the Palette selector
+    paletteSel.insertAdjacentElement("afterend", wrap);
+    return true;
+  }
+
+  function retry(){
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (addSkipUI()) clearInterval(iv);
+      else if (Date.now() - t0 > 3000) clearInterval(iv);
+    }, 120);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", retry);
+  else retry();
+})();
