@@ -325,36 +325,14 @@ if (document.readyState === "loading") {
   const KEY_NAME   = "shufflizer.palette.name";
   const KEY_CUSTOM = "shufflizer.palette.custom";
 
-  function normHex(s){
-    if (!s) return null;
-    s = String(s).trim();
-    if (!s) return null;
-    if (s[0] !== "#") s = "#" + s;
-    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
-    if (m3){
-      const a = m3[1];
-      return ("#" + a[0]+a[0] + a[1]+a[1] + a[2]+a[2]).toUpperCase();
-    }
-    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
-    if (m6) return ("#" + m6[1]).toUpperCase();
-    return null;
-  }
-
-  function normHex6or8(s){
-    if (!s) return null;
-    s = String(s).trim();
-    if (!s) return null;
-    if (s[0] !== "#") s = "#" + s;
-    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
-    if (m6) return ("#" + m6[1]).toUpperCase();
-    const m8 = /^#([0-9a-fA-F]{8})$/.exec(s);
-    if (m8) return ("#" + m8[1]).toUpperCase();
-    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
-    if (m3){
-      const a = m3[1];
-      return ("#" + a[0]+a[0] + a[1]+a[1] + a[2]+a[2]).toUpperCase();
-    }
-    return null;
+  function isValidColor(v){
+    if (!v) return false;
+    v = String(v).trim();
+    if (!v) return false;
+    if (v.startsWith("#")) return true;
+    if (v.startsWith("rgb(")) return true;
+    if (v.startsWith("rgba(")) return true;
+    return false;
   }
 
   function clamp01(x){
@@ -393,20 +371,20 @@ if (document.readyState === "loading") {
   }
 
   function readCustom(){
-    if (window.SHUF_getCustomPalette) return window.SHUF_getCustomPalette();
     try{
       const raw = localStorage.getItem(KEY_CUSTOM);
       if (raw) return JSON.parse(raw);
     }catch(e){}
+    // fallback defaults
     return { primary:"#39FF14", accent:"#7CFF5B", glow:"#39FF14", glowFill:"#39FF1440", tint:0.25 };
   }
 
-  function writeCustom(partial){
-    if (window.SHUF_setCustomPalette) return window.SHUF_setCustomPalette(partial);
-    const cur = readCustom();
-    const next = Object.assign({}, cur, partial);
-    try{ localStorage.setItem(KEY_CUSTOM, JSON.stringify(next)); }catch(e){}
-    return next;
+  function writeCustom(obj){
+    try{ localStorage.setItem(KEY_CUSTOM, JSON.stringify(obj)); }catch(e){}
+  }
+
+  function getStoredName(){
+    try{ return localStorage.getItem(KEY_NAME) || ""; }catch(e){ return ""; }
   }
 
   function applyName(name){
@@ -414,25 +392,83 @@ if (document.readyState === "loading") {
     else try{ localStorage.setItem(KEY_NAME, name); }catch(e){}
   }
 
-  function findPaletteSelect(){
-    const presets = window.SHUF_PRESETS ? Object.keys(window.SHUF_PRESETS) : [];
-    const selects = Array.from(document.querySelectorAll("select"));
-    for (const s of selects){
-      const opts = Array.from(s.options || []).map(o => (o.value || o.textContent || "").trim());
-      if (presets.some(p => opts.includes(p))) return s;
+  function presetNames(){
+    try{
+      const p = window.SHUF_PRESETS || {};
+      return Object.keys(p);
+    }catch(e){
+      return [];
     }
-    return document.querySelector('select[id*="palette" i],select[name*="palette" i]') || null;
   }
 
-  function ensureCustomOption(sel){
-    if (!sel) return;
-    const has = Array.from(sel.options).some(o => (o.value || o.textContent) === "Custom");
-    if (!has){
-      const opt = document.createElement("option");
-      opt.value = "Custom";
-      opt.textContent = "Custom";
-      sel.appendChild(opt);
+  function findPaletteSelectByContext(){
+    const selects = Array.from(document.querySelectorAll("select"));
+    // Choose a select whose parent container includes the word "Palette"
+    const ctx = selects.filter(sel => {
+      const p = sel.parentElement;
+      if (!p) return false;
+      const t = (p.textContent || "");
+      return /palette/i.test(t);
+    });
+    if (ctx.length) return ctx[0];
+
+    // Fallback: look for a label-ish element "Palette" and a select nearby
+    const els = Array.from(document.querySelectorAll("*"));
+    for (const e of els){
+      const txt = (e.textContent || "").trim();
+      if (txt === "Palette" || txt === "Palette "){
+        const p = e.parentElement;
+        if (p){
+          const s = p.querySelector("select");
+          if (s) return s;
+        }
+      }
     }
+    return null;
+  }
+
+  function ensurePaletteOptions(sel){
+    if (!sel) return false;
+    const names = presetNames();
+    if (!names.length) return false;
+
+    // If already populated with presets, do nothing
+    const existing = Array.from(sel.options || []).map(o => (o.value || o.textContent || "").trim()).filter(Boolean);
+    const hasAnyPreset = existing.some(v => names.includes(v));
+
+    if (!sel.options || sel.options.length === 0 || !hasAnyPreset){
+      // rebuild options
+      sel.innerHTML = "";
+      for (const n of names){
+        const opt = document.createElement("option");
+        opt.value = n;
+        opt.textContent = n;
+        sel.appendChild(opt);
+      }
+      // Add Custom at end
+      const optC = document.createElement("option");
+      optC.value = "Custom";
+      optC.textContent = "Custom";
+      sel.appendChild(optC);
+    } else {
+      // ensure Custom exists
+      const hasCustom = existing.includes("Custom");
+      if (!hasCustom){
+        const optC = document.createElement("option");
+        optC.value = "Custom";
+        optC.textContent = "Custom";
+        sel.appendChild(optC);
+      }
+    }
+
+    // Select current stored palette name if possible
+    const stored = getStoredName();
+    if (stored){
+      sel.value = stored;
+    } else if (window.SHUF && window.SHUF.name){
+      sel.value = window.SHUF.name;
+    }
+    return true;
   }
 
   function makeRow(label, input){
@@ -446,16 +482,12 @@ if (document.readyState === "loading") {
     ensureStyles();
 
     const panel = el("div", { id: "shufCustomPalettePanel" });
-    const err = el("div", {
-      id:"shufCustomPaletteError",
-      "class":"shuf-pal-error",
-      "text":"One or more hex values are invalid. Use #RGB, #RRGGBB, and Glow fill may also use #RRGGBBAA."
-    });
+    const err = el("div", { id:"shufCustomPaletteError", "class":"shuf-pal-error", "text":"Invalid CSS color string." });
 
-    const inPrimary  = el("input", { type:"text", placeholder:"#RRGGBB" });
-    const inAccent   = el("input", { type:"text", placeholder:"#RRGGBB" });
-    const inGlow     = el("input", { type:"text", placeholder:"#RRGGBB" });
-    const inGlowFill = el("input", { type:"text", placeholder:"#RRGGBB or #RRGGBBAA" });
+    const inPrimary  = el("input", { type:"text" });
+    const inAccent   = el("input", { type:"text" });
+    const inGlow     = el("input", { type:"text" });
+    const inGlowFill = el("input", { type:"text" });
     const tint       = el("input", { type:"range", min:"0", max:"1", step:"0.01" });
 
     panel.appendChild(makeRow("Primary", inPrimary));
@@ -474,28 +506,23 @@ if (document.readyState === "loading") {
     tint.value       = String(cur.tint ?? 0.25);
 
     let tmr = null;
-    function scheduleApply(){
+    function schedule(){
       if (tmr) clearTimeout(tmr);
-      tmr = setTimeout(applyNow, 80);
+      tmr = setTimeout(applyNow, 60);
     }
 
     function applyNow(){
-      const p  = normHex(inPrimary.value);
-      const a  = normHex(inAccent.value);
-      const g  = normHex(inGlow.value);
-      const gf = normHex6or8(inGlowFill.value);
+      const p  = inPrimary.value.trim();
+      const a  = inAccent.value.trim();
+      const g  = inGlow.value.trim();
+      const gf = inGlowFill.value.trim();
       const tv = clamp01(tint.value);
 
-      const ok = !!p && !!a && !!g && !!gf;
+      const ok = isValidColor(p) && isValidColor(a) && isValidColor(g) && isValidColor(gf);
       err.style.display = ok ? "none" : "block";
+      if (!ok) return;
 
-      const partial = { tint: tv };
-      if (p)  partial.primary  = p;
-      if (a)  partial.accent   = a;
-      if (g)  partial.glow     = g;
-      if (gf) partial.glowFill = gf;
-
-      writeCustom(partial);
+      writeCustom({ primary:p, accent:a, glow:g, glowFill:gf, tint:tv });
 
       if (sel && sel.value === "Custom"){
         applyName("Custom");
@@ -503,20 +530,18 @@ if (document.readyState === "loading") {
     }
 
     [inPrimary, inAccent, inGlow, inGlowFill].forEach(inp => {
-      inp.addEventListener("input", scheduleApply);
-      inp.addEventListener("change", scheduleApply);
+      inp.addEventListener("input", schedule);
+      inp.addEventListener("change", schedule);
     });
-    tint.addEventListener("input", scheduleApply);
-    tint.addEventListener("change", scheduleApply);
+    tint.addEventListener("input", schedule);
+    tint.addEventListener("change", schedule);
 
     return panel;
   }
 
-  function attach(){
-    const sel = findPaletteSelect();
-    if (!sel) return;
-
-    ensureCustomOption(sel);
+  function wire(sel){
+    if (!sel || sel.__shufCustomWired) return;
+    sel.__shufCustomWired = true;
 
     let panel = document.getElementById("shufCustomPalettePanel");
     if (!panel){
@@ -530,8 +555,6 @@ if (document.readyState === "loading") {
 
     sel.addEventListener("change", () => {
       if (sel.value === "Custom"){
-        const cur = readCustom();
-        writeCustom(cur);
         applyName("Custom");
       } else {
         applyName(sel.value);
@@ -542,9 +565,30 @@ if (document.readyState === "loading") {
     refresh();
   }
 
+  function tryAttach(){
+    const sel = findPaletteSelectByContext();
+    if (!sel) return false;
+    const ok = ensurePaletteOptions(sel);
+    if (!ok) return false;
+    wire(sel);
+    return true;
+  }
+
+  // Retry for up to ~3 seconds (UI might build menu after load)
+  function retryAttach(){
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (tryAttach()){
+        clearInterval(iv);
+      } else if (Date.now() - t0 > 3000){
+        clearInterval(iv);
+      }
+    }, 120);
+  }
+
   if (document.readyState === "loading"){
-    document.addEventListener("DOMContentLoaded", () => setTimeout(attach, 0));
+    document.addEventListener("DOMContentLoaded", () => retryAttach());
   } else {
-    setTimeout(attach, 0);
+    retryAttach();
   }
 })();
