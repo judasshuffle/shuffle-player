@@ -26,3 +26,10 @@ asr-env/
 
 *.WORKING
 *.WORKING_*
+
+# Shufflizer runtime / local snapshots (do not commit)
+web/shufflizer/nowplaying.json
+web/shufflizer.brokeish_*
+web/shufflizer/*_snapshot_*/
+web/shufflizer/backups_palette_*/
+web/shufflizer/api/
