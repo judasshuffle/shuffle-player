@@ -1,3 +1,36 @@
+// --- SHUFFLIZER_TINT_HELPERS ---
+function _shuf_parseRGB(s){
+  // expects "rgb(r,g,b)" or "rgba(r,g,b,a)"
+  const m = /rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(String(s||""));
+  if (!m) return {r:255,g:255,b:255};
+  return {r:+m[1], g:+m[2], b:+m[3]};
+}
+function _shuf_hslToRgb(h,s,l){
+  // h:0-360, s/l:0-1
+  h = ((h % 360) + 360) % 360;
+  const c = (1 - Math.abs(2*l - 1)) * s;
+  const x = c * (1 - Math.abs(((h/60) % 2) - 1));
+  const m = l - c/2;
+  let r=0,g=0,b=0;
+  if (h < 60)      { r=c; g=x; b=0; }
+  else if (h <120) { r=x; g=c; b=0; }
+  else if (h <180) { r=0; g=c; b=x; }
+  else if (h <240) { r=0; g=x; b=c; }
+  else if (h <300) { r=x; g=0; b=c; }
+  else             { r=c; g=0; b=x; }
+  return { r: Math.round((r+m)*255), g: Math.round((g+m)*255), b: Math.round((b+m)*255) };
+}
+function _shuf_mixRGB(a,b,t){
+  t = Math.max(0, Math.min(1, t));
+  return {
+    r: Math.round(a.r + (b.r - a.r)*t),
+    g: Math.round(a.g + (b.g - a.g)*t),
+    b: Math.round(a.b + (b.b - a.b)*t),
+  };
+}
+function _shuf_rgba(c,a){ return `rgba(${c.r},${c.g},${c.b},${a})`; }
+// --- /SHUFFLIZER_TINT_HELPERS ---
+
 let __scopeAng = 0;
 let __scopeDrift = 0;
 
@@ -15,8 +48,13 @@ export const effect = {
     ctx.fillStyle = `rgba(0,0,0,${trailAmt})`;
     ctx.fillRect(0, 0, w, h);
 
-    ctx.strokeStyle = `hsl(${energy * 900},100%,55%)`;
-    ctx.lineWidth = 1.5 + energy * 4;
+    // rainbow energy, tinted toward palette
+    const _tint = (typeof window !== "undefined" && typeof window.SHUF_TINT === "number") ? window.SHUF_TINT : 0.65;
+    const _h = (energy * 900) % 360;
+    const _rain = _shuf_hslToRgb(_h, 1.0, 55);
+    const _pal = _shuf_parseRGB((energy > 0.55 ? (window.SHUF_ACCENT || window.SHUF_PRIMARY) : (window.SHUF_PRIMARY || "rgba(0,255,102,1)")));
+    const _mix = _shuf_mixRGB(_rain, _pal, _tint);
+    ctx.strokeStyle = _shuf_rgba(_mix, 1.0);ctx.lineWidth = 1.5 + energy * 4;
 
     const glowOn = globals.glow;
     if (glowOn) {

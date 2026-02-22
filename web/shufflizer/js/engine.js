@@ -55,7 +55,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
 
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = 2.6;
-    ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
+    ctx.strokeStyle = (window.SHUF_PRIMARY || (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)"));
 
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
@@ -83,7 +83,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
 
     ctx.globalAlpha = 0.75;
     ctx.lineWidth = 3.8;
-    ctx.strokeStyle = "rgba(0,255,102,0.80)";
+    ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.80)");
 
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
@@ -112,7 +112,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
 
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = 2.0;
-    ctx.strokeStyle = "rgba(0,255,102,0.95)";
+    ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
 
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
@@ -138,7 +138,7 @@ function drawNowPlaying(ctx, w, h, title, glowOn) {
   if (glowOn) {
     ctx.globalCompositeOperation = "lighter";
     ctx.shadowBlur = 10;
-    ctx.shadowColor = "#ffffff";
+    ctx.shadowColor = (window.SHUF_ACCENT || "#ffffff");
   }
 
   ctx.font = "14px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
@@ -149,8 +149,8 @@ function drawNowPlaying(ctx, w, h, title, glowOn) {
   const y = h - pad;
 
   // Outline + fill effect using current strokeStyle-ish
-  ctx.strokeStyle = "rgba(0,255,102,0.9)";
-  ctx.fillStyle = "rgba(0,255,102,0.25)";
+  ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.9)");
+  ctx.fillStyle = (window.SHUF_GLOW_FILL || "rgba(0,255,102,0.25)");
   ctx.strokeText(title, x, y);
   ctx.fillText(title, x, y);
 
@@ -235,7 +235,7 @@ export function startEngine(canvas, analyser, uiState) {
       if (glowOn) {
         ctx.globalCompositeOperation = "lighter";
         ctx.shadowBlur = 10;
-        ctx.shadowColor = "rgba(0,255,102,0.95)";
+        ctx.shadowColor = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
       }
 
       ctx.font = `${Math.floor(p.size)}px system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
@@ -243,7 +243,7 @@ export function startEngine(canvas, analyser, uiState) {
       ctx.textBaseline = "middle";
 
       // neon-ish
-      ctx.strokeStyle = "rgba(0,255,102,0.95)";
+      ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
       ctx.fillStyle = ctx.strokeStyle;
       ctx.lineWidth = 5;
 
@@ -334,7 +334,7 @@ export function startEngine(canvas, analyser, uiState) {
       ctx.font = "22px system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.strokeStyle = "rgba(0,255,102,0.95)";
+      ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
       ctx.fillStyle = ctx.strokeStyle;
       ctx.lineWidth = 3;
       ctx.strokeText("TRACKTITLE CHANGED", w/2, h/2);

@@ -14,6 +14,11 @@ audioEl.load();
 const ui = initUI();
 // Palette step1: override primary stroke (RGBA)
 window.SHUF_PRIMARY = "rgba(255,146,0,0.95)"; // Ember test
+window.SHUF_TINT = 0.65; // 0=no tint (full rainbow), 1=full palette
+window.SHUF_ACCENT = "rgba(255,205,115,0.90)"; // Ember highlight
+window.SHUF_GLOW   = "rgba(215,123,95,0.90)";  // Ember glow/shadow
+window.SHUF_GLOW_FILL = "rgba(215,123,95,0.25)"; // Ember soft fill
+
 
 const audio = initAudio(audioEl, { startMuted: ui.state.muted });
 
