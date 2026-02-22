@@ -52,7 +52,13 @@ if (!Number.isFinite(waveGain)) {
 if (!Number.isFinite(waveGain)) waveGain = 1.0;
 waveGain = __clamp(waveGain, 0.0, 10.0);
     // Remap slider so 0.50x behaves like the practical max (keeps the control usable)
-    const nGain = __clamp(waveGain / 1.0, 0.0, 1.0);
+    
+// Remap slider 0..10 into sweet spot 5.6..9.0
+const sweetMin = 5.6;
+const sweetMax = 9.0;
+const mapped = sweetMin + (__clamp(waveGain, 0.0, 10.0) / 10.0) * (sweetMax - sweetMin);
+const nGain = __clamp(mapped / 10.0, 0.0, 1.0);
+
     // Audio-taper curve: spreads control so early slider travel isn't "all the action"
     const taper = 4.0; // try 3.0 (less), 5.0 (more)
     const gainEff = Math.pow(nGain, taper);
