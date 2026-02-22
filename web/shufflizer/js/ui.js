@@ -791,3 +791,89 @@ if (document.readyState === "loading") {
   `;
   document.head.appendChild(st);
 })();
+
+// WAVE_GAIN_UI
+(function(){
+  const KEY = "shufflizer.wave.gain";
+
+  function findPaletteSelect(){
+    const sels = Array.from(document.querySelectorAll("select"));
+    const hit = sels.find(sel => sel.parentElement && /palette/i.test(sel.parentElement.textContent || ""));
+    return hit || null;
+  }
+
+  function addWaveGain(){
+    const paletteSel = findPaletteSelect();
+    if (!paletteSel) return false;
+    if (document.getElementById("shufWaveGain")) return true;
+
+    const wrap = document.createElement("div");
+    wrap.id = "shufWaveGain";
+    wrap.style.marginTop = "10px";
+
+    const label = document.createElement("label");
+    label.textContent = "Wave sensitivity";
+    label.style.display = "block";
+    label.style.fontSize = "12px";
+
+    const row = document.createElement("div");
+    row.style.display = "flex";
+    row.style.gap = "10px";
+    row.style.alignItems = "center";
+    row.style.marginTop = "6px";
+
+    const slider = document.createElement("input");
+    slider.type = "range";
+    slider.min = "0.50";
+    slider.max = "3.00";
+    slider.step = "0.05";
+
+    const val = document.createElement("span");
+    val.style.fontSize = "12px";
+    val.style.opacity = "0.8";
+    val.style.minWidth = "48px";
+    val.style.textAlign = "right";
+
+    function set(v){
+      const n = Math.max(0.25, Math.min(4.0, Number(v) || 1.0));
+      slider.value = String(n.toFixed(2));
+      val.textContent = n.toFixed(2) + "×";
+      try { localStorage.setItem(KEY, String(n)); } catch(e) {}
+      // If your UI has a central state object, we also mirror to window.SHUF_UI if present
+      try {
+        if (window.ui && window.ui.state) window.ui.state.waveGain = n;
+        if (window.SHUF_UI) window.SHUF_UI.waveGain = n;
+      } catch(e) {}
+    }
+
+    // init
+    let start = 1.0;
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw && raw.trim()) start = Number(raw);
+    } catch(e) {}
+    set(start);
+
+    slider.addEventListener("input", () => set(slider.value));
+
+    row.appendChild(slider);
+    row.appendChild(val);
+
+    wrap.appendChild(label);
+    wrap.appendChild(row);
+
+    paletteSel.insertAdjacentElement("afterend", wrap);
+    return true;
+  }
+
+  function retry(){
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (addWaveGain()) clearInterval(iv);
+      else if (Date.now() - t0 > 3000) clearInterval(iv);
+    }, 120);
+  }
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", retry);
+  else retry();
+})();

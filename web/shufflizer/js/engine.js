@@ -38,6 +38,9 @@ function drawOverlays(ctx, w, h, t, audio, ui){
   // Throb based on energy (kept stable)
   const throb = __clamp(energy * (ui.ovThrob ?? 0), 0, 1.25);
 
+    // Waveform sensitivity (multiplies amplitude of ring + spoke wave)
+    const waveGain = __clamp((ui.waveGain ?? 1.0), 0.25, 4.0);
+
   // independent angles
   __ovHubAng   += (ui.ovHubRot   ?? 0) * 0.0025;
   __ovBigAng   += (ui.ovBigRot   ?? 0) * 0.0025;
@@ -60,7 +63,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
       const a = (i / wave.length) * Math.PI * 2;
-      const v = (__smoothSample(wave, i, 5) - 128) / 128;
+      const v = ((__smoothSample(wave, i, 5) - 128) / 128) * waveGain;
       const r = baseR + v * ampR;
       const x = Math.cos(a) * r;
       const y = Math.sin(a) * r;
@@ -88,7 +91,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
       const a = (i / wave.length) * Math.PI * 2;
-      const v = (wave[i] - 128) / 128;
+      const v = ((wave[i] - 128) / 128) * waveGain;
       const r = baseR + v * ampR;
       const x = Math.cos(a) * r;
       const y = Math.sin(a) * r;
@@ -117,7 +120,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
       const x = (i / (wave.length - 1)) * (spokeLen * 2) - spokeLen;
-      const y = ((wave[i] - 128) / 128) * amp;
+      const y = (((wave[i] - 128) / 128) * waveGain) * amp;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
