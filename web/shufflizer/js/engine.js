@@ -39,10 +39,19 @@ function drawOverlays(ctx, w, h, t, audio, ui){
   const throb = __clamp(energy * (ui.ovThrob ?? 0), 0, 1.25);
 
     // Waveform sensitivity (multiplies amplitude of ring + spoke wave)
-    const waveGain = __clamp((ui.waveGain ?? 1.0), 0.0, 10.0);
-
-  
-    // Spoke gets a non-linear "insane" boost at high sensitivity
+    // Waveform sensitivity (multiplies amplitude of ring + spoke wave)
+// NOTE: UI injection may not have access to the live uiState object in all browsers,
+// so we also read from localStorage as a reliable fallback.
+let waveGain = (ui && Number.isFinite(ui.waveGain)) ? ui.waveGain : NaN;
+if (!Number.isFinite(waveGain)) {
+  try {
+    const raw = localStorage.getItem("shufflizer.wave.gain");
+    if (raw != null && raw !== "") waveGain = Number(raw);
+  } catch(e) {}
+}
+if (!Number.isFinite(waveGain)) waveGain = 1.0;
+waveGain = __clamp(waveGain, 0.0, 10.0);
+// Spoke gets a non-linear "insane" boost at high sensitivity
     const spokeGain = Math.pow(waveGain, 2.2) * 140.0;
 // independent angles
   __ovHubAng   += (ui.ovHubRot   ?? 0) * 0.0025;
