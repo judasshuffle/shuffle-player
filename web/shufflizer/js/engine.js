@@ -41,7 +41,10 @@ function drawOverlays(ctx, w, h, t, audio, ui){
     // Waveform sensitivity (multiplies amplitude of ring + spoke wave)
     const waveGain = __clamp((ui.waveGain ?? 1.0), 0.0, 10.0);
 
-  // independent angles
+  
+    // Spoke gets a non-linear "insane" boost at high sensitivity
+    const spokeGain = Math.pow(waveGain, 2.2) * 140.0;
+// independent angles
   __ovHubAng   += (ui.ovHubRot   ?? 0) * 0.0025;
   __ovBigAng   += (ui.ovBigRot   ?? 0) * 0.0025;
   __ovSpokeAng += (ui.ovSpokeRot ?? 0) * 0.0025;
@@ -120,7 +123,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){
       const x = (i / (wave.length - 1)) * (spokeLen * 2) - spokeLen;
-      const y = (((wave[i] - 128) / 128) * waveGain) * amp;
+      const y = (((wave[i] - 128) / 128) * spokeGain) * amp;
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
