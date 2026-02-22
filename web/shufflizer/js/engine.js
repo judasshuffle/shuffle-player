@@ -55,7 +55,7 @@ function drawOverlays(ctx, w, h, t, audio, ui){
 
     ctx.globalAlpha = 0.85;
     ctx.lineWidth = 2.6;
-    ctx.strokeStyle = "rgba(0,255,102,0.95)";
+    ctx.strokeStyle = (window.SHUF_PRIMARY || "rgba(0,255,102,0.95)");
 
     ctx.beginPath();
     for (let i = 0; i < wave.length; i += step){

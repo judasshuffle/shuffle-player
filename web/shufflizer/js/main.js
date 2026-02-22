@@ -12,6 +12,9 @@ audioEl.src = `http://${location.hostname}:8001/stream.mp3`;
 audioEl.load();
 
 const ui = initUI();
+// Palette step1: override primary stroke (RGBA)
+window.SHUF_PRIMARY = "rgba(255,146,0,0.95)"; // Ember test
+
 const audio = initAudio(audioEl, { startMuted: ui.state.muted });
 
 // Now playing (Icecast status JSON)
