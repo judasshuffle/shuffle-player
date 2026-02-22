@@ -164,7 +164,8 @@ export function startEngine(canvas, analyser, uiState) {
   let h = window.innerHeight;
 
   function resize() {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    // Cap DPR for performance (Canvas 2D gets expensive fast with glow/trails on hiDPI)
+      const dpr = Math.min(1.0, Math.max(1, window.devicePixelRatio || 1));
     w = window.innerWidth;
     h = window.innerHeight;
     canvas.width = Math.floor(w * dpr);
