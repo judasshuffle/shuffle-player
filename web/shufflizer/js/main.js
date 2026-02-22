@@ -8,7 +8,12 @@ const canvas = document.getElementById("c");
 const audioEl = document.getElementById("audio");
 
 // Use the page host (Pi IP) so remote clients hit the Pi's Icecast.
-audioEl.src = `http://${location.hostname}:8001/stream.mp3`;
+// Stream URL:
+// - Normal LAN use: http://<this-host>:8001/stream.mp3
+// - Cloudflare quick tunnel: same-origin /stream.mp3 (proxied by 8091 server)
+audioEl.src = /trycloudflare\.com$/i.test(location.hostname)
+  ? new URL("/stream.mp3", location.href).toString()
+  : `http://${location.hostname}:8001/stream.mp3`;
 audioEl.load();
 
 const ui = initUI();
