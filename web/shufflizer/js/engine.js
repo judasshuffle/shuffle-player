@@ -205,7 +205,7 @@ export function startEngine(canvas, analyser, uiState) {
     if (titleParticles.length > 10) titleParticles.splice(0, titleParticles.length - 10);
   }
 
-  function drawTitleParticles(ctx, w, h, energy, glowOn) {
+  function drawTitleParticles(ctx, w, h, energy, glowOn, dt) {
     if (!titleParticles.length) return;
     const cx = w / 2, cy = h / 2;
 
@@ -224,13 +224,14 @@ export function startEngine(canvas, analyser, uiState) {
       // damping
       p.vr *= 0.99;
       
-      p.life -= 0.0008;
-
+      const _dt = Math.min(0.05, Math.max(0.0, dt || 0));
+      
+      p.life -= _dt * 0.12; // ~8s lifetime at 60fps
       const x = cx + Math.cos(p.angle) * p.radius;
       const y = cy + Math.sin(p.angle) * p.radius;
 
       ctx.save();
-      ctx.globalAlpha = Math.max(0, p.life);
+      ctx.globalAlpha = Math.pow(Math.max(0, p.life), 1.6);
 
       if (glowOn) {
         ctx.globalCompositeOperation = "lighter";
@@ -312,12 +313,13 @@ export function startEngine(canvas, analyser, uiState) {
     if (params.titleParticles !== false && globals.trackTitle && globals.trackTitle !== _lastTitle) {
       _lastTitle = globals.trackTitle;
       _nextTitlePing = t + 60000; // 60s
+      titleParticles.length = 0;
       spawnTitleParticle(globals.trackTitle);
       _titleDebugUntil = t + 2000;
     }
 
     // TITLE_PARTICLES_ENGINE: draw on top
-    if (params.titleParticles !== false) drawTitleParticles(ctx, w, h, energy, globals.glow);
+    if (params.titleParticles !== false) drawTitleParticles(ctx, w, h, energy, globals.glow, dt);
 
     // TITLE_PARTICLES_ENGINE: periodic ping
     if (params.titleParticles !== false && globals.trackTitle && t >= _nextTitlePing) {
