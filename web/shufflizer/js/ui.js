@@ -251,3 +251,71 @@ return {
     },
   };
 }
+
+
+// --- SHUFFLIZER_PALETTE_UI ---
+function _shufPaletteMount(){
+  const host = document.getElementById("ui");
+  if (!host) return;
+
+  // container
+  const row = document.createElement("div");
+  row.id = "paletteRow";
+  row.style.display = "flex";
+  row.style.alignItems = "center";
+  row.style.gap = "8px";
+  row.style.marginTop = "8px";
+
+  const label = document.createElement("span");
+  label.textContent = "Palette";
+  label.style.opacity = "0.9";
+
+  const sel = document.createElement("select");
+  sel.id = "paletteSelect";
+  sel.style.maxWidth = "220px";
+
+  const presets = (window.SHUF_PRESETS || {});
+  const names = Object.keys(presets);
+  for (const name of names) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = name;
+    sel.appendChild(opt);
+  }
+
+  // set current
+  const current = (window.SHUF && window.SHUF.name) ? window.SHUF.name : "Ember Grid";
+  sel.value = current;
+
+  sel.addEventListener("change", () => {
+    const name = sel.value;
+    const p = presets[name];
+    if (!p) return;
+
+    window.SHUF = Object.assign({ name }, p);
+    // back-compat
+    window.SHUF_PRIMARY = window.SHUF.primary;
+    window.SHUF_ACCENT  = window.SHUF.accent;
+    window.SHUF_GLOW    = window.SHUF.glow;
+    window.SHUF_GLOW_FILL = window.SHUF.glowFill;
+    window.SHUF_TINT = window.SHUF.tint;
+
+    try { localStorage.setItem("shufflizer.palette.name", name); } catch {}
+
+    // notify anyone who cares
+    window.dispatchEvent(new CustomEvent("shufflizer:palette", { detail: window.SHUF }));
+  });
+
+  row.appendChild(label);
+  row.appendChild(sel);
+
+  host.appendChild(row);
+}
+
+// Mount after DOM is ready
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", _shufPaletteMount, { once: true });
+} else {
+  _shufPaletteMount();
+}
+// --- /SHUFFLIZER_PALETTE_UI ---

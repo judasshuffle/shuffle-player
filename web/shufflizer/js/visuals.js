@@ -175,10 +175,10 @@ export function initVisuals(canvas, analyser, uiState) {
     angle += spinAmt * 0.01 + energy * 0.1;
 
     // rainbow energy, tinted toward palette
-    const _tint = (typeof window !== "undefined" && typeof window.SHUF_TINT === "number") ? window.SHUF_TINT : 0.65;
+    const _tint = (typeof window !== "undefined" && typeof (window.SHUF && typeof window.SHUF.tint==='number') ? window.SHUF.tint : window.SHUF_TINT === "number") ? (window.SHUF && typeof window.SHUF.tint==='number') ? window.SHUF.tint : window.SHUF_TINT : 0.65;
     const _h = (energy * 800) % 360;
     const _rain = _shuf_hslToRgb(_h, 1.0, 50);
-    const _pal = _shuf_parseRGB((energy > 0.55 ? (window.SHUF_ACCENT || window.SHUF_PRIMARY) : (window.SHUF_PRIMARY || "rgba(0,255,102,1)")));
+    const _pal = _shuf_parseRGB((energy > 0.55 ? ((window.SHUF && window.SHUF.accent) ? window.SHUF.accent : window.SHUF_ACCENT || (window.SHUF && window.SHUF.primary) ? window.SHUF.primary : window.SHUF_PRIMARY) : ((window.SHUF && window.SHUF.primary) ? window.SHUF.primary : window.SHUF_PRIMARY || "rgba(0,255,102,1)")));
     const _mix = _shuf_mixRGB(_rain, _pal, _tint);
     ctx.strokeStyle = _shuf_rgba(_mix, 1.0);ctx.lineWidth = 2 + energy * 5;
 

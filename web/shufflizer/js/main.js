@@ -12,6 +12,24 @@ audioEl.src = `http://${location.hostname}:8001/stream.mp3`;
 audioEl.load();
 
 const ui = initUI();
+// --- SHUFFLIZER_PALETTE_CORE ---
+window.SHUF_PRESETS = window.SHUF_PRESETS || {"Phosphor Prime":{"primary":"rgba(0,255,102,0.95)","accent":"rgba(102,255,208,0.90)","glow":"rgba(0,170,68,0.90)","glowFill":"rgba(0,170,68,0.25)","tint":0.65},"Ember Grid":{"primary":"rgba(255,146,0,0.95)","accent":"rgba(255,205,115,0.90)","glow":"rgba(215,123,95,0.90)","glowFill":"rgba(215,123,95,0.25)","tint":0.65},"Copper Pulse":{"primary":"rgba(241,142,63,0.95)","accent":"rgba(229,149,121,0.90)","glow":"rgba(193,76,50,0.90)","glowFill":"rgba(193,76,50,0.25)","tint":0.65},"Overdrive":{"primary":"rgba(255,197,0,0.95)","accent":"rgba(236,65,11,0.90)","glow":"rgba(179,0,25,0.90)","glowFill":"rgba(179,0,25,0.25)","tint":0.7},"Midnight Alloy":{"primary":"rgba(255,164,0,0.95)","accent":"rgba(108,52,0,0.90)","glow":"rgba(65,34,42,0.90)","glowFill":"rgba(65,34,42,0.25)","tint":0.7},"Analog Drift":{"primary":"rgba(255,205,135,0.95)","accent":"rgba(188,117,118,0.90)","glow":"rgba(105,107,126,0.90)","glowFill":"rgba(105,107,126,0.25)","tint":0.6}};
+(function(){
+  const KEY = 'shufflizer.palette.name';
+  const DEFAULT = 'Ember Grid';
+  let name = DEFAULT;
+  try { name = localStorage.getItem(KEY) || DEFAULT; } catch {}
+  const p = (window.SHUF_PRESETS && window.SHUF_PRESETS[name]) ? window.SHUF_PRESETS[name] : window.SHUF_PRESETS[DEFAULT];
+  window.SHUF = Object.assign({ name }, p);
+  // Back-compat globals (still used in some places)
+  window.SHUF_PRIMARY = window.SHUF.primary;
+  window.SHUF_ACCENT  = window.SHUF.accent;
+  window.SHUF_GLOW    = window.SHUF.glow;
+  window.SHUF_GLOW_FILL = window.SHUF.glowFill;
+  window.SHUF_TINT = window.SHUF.tint;
+})();
+// --- /SHUFFLIZER_PALETTE_CORE ---
+
 // Palette step1: override primary stroke (RGBA)
 window.SHUF_PRIMARY = "rgba(255,146,0,0.95)"; // Ember test
 window.SHUF_TINT = 0.65; // 0=no tint (full rainbow), 1=full palette
