@@ -835,7 +835,8 @@ if (document.readyState === "loading") {
     val.style.textAlign = "right";
 
     function set(v){
-      const n = Math.max(0.0, Math.min(10.0, Number(v) || 0.0));
+      const num = Number(v);
+      const n = Math.max(0.0, Math.min(10.0, (Number.isFinite(num) ? num : 1.0)));
       slider.value = String(n.toFixed(2));
       val.textContent = n.toFixed(2) + "×";
       try { localStorage.setItem(KEY, String(n)); } catch(e) {}
