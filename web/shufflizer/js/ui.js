@@ -319,3 +319,232 @@ if (document.readyState === "loading") {
   _shufPaletteMount();
 }
 // --- /SHUFFLIZER_PALETTE_UI ---
+
+// --- Custom palette UI (Step2) ---
+(function(){
+  const KEY_NAME   = "shufflizer.palette.name";
+  const KEY_CUSTOM = "shufflizer.palette.custom";
+
+  function normHex(s){
+    if (!s) return null;
+    s = String(s).trim();
+    if (!s) return null;
+    if (s[0] !== "#") s = "#" + s;
+    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
+    if (m3){
+      const a = m3[1];
+      return ("#" + a[0]+a[0] + a[1]+a[1] + a[2]+a[2]).toUpperCase();
+    }
+    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
+    if (m6) return ("#" + m6[1]).toUpperCase();
+    return null;
+  }
+
+  function normHex6or8(s){
+    if (!s) return null;
+    s = String(s).trim();
+    if (!s) return null;
+    if (s[0] !== "#") s = "#" + s;
+    const m6 = /^#([0-9a-fA-F]{6})$/.exec(s);
+    if (m6) return ("#" + m6[1]).toUpperCase();
+    const m8 = /^#([0-9a-fA-F]{8})$/.exec(s);
+    if (m8) return ("#" + m8[1]).toUpperCase();
+    const m3 = /^#([0-9a-fA-F]{3})$/.exec(s);
+    if (m3){
+      const a = m3[1];
+      return ("#" + a[0]+a[0] + a[1]+a[1] + a[2]+a[2]).toUpperCase();
+    }
+    return null;
+  }
+
+  function clamp01(x){
+    x = Number(x);
+    if (!isFinite(x)) return 0;
+    return Math.max(0, Math.min(1, x));
+  }
+
+  function el(tag, attrs){
+    const n = document.createElement(tag);
+    if (attrs){
+      for (const k in attrs){
+        if (k === "class") n.className = attrs[k];
+        else if (k === "text") n.textContent = attrs[k];
+        else n.setAttribute(k, attrs[k]);
+      }
+    }
+    return n;
+  }
+
+  function ensureStyles(){
+    if (document.getElementById("shuf-pal-styles")) return;
+    const css = `
+#shufCustomPalettePanel{margin-top:10px;padding:10px;border:1px solid rgba(255,255,255,.12);border-radius:10px;}
+#shufCustomPalettePanel .shuf-pal-row{display:flex;align-items:center;gap:10px;margin:6px 0;}
+#shufCustomPalettePanel .shuf-pal-label{min-width:88px;opacity:.85;font-size:12px;}
+#shufCustomPalettePanel input[type="text"]{flex:1;min-width:0;}
+#shufCustomPalettePanel input[type="range"]{flex:1;}
+#shufCustomPalettePanel .shuf-pal-help{opacity:.7;font-size:11px;margin-top:6px;line-height:1.2;}
+#shufCustomPalettePanel .shuf-pal-error{color:#ff8a8a;font-size:11px;margin-top:6px;display:none;}
+`;
+    const style = document.createElement("style");
+    style.id = "shuf-pal-styles";
+    style.textContent = css;
+    document.head.appendChild(style);
+  }
+
+  function readCustom(){
+    if (window.SHUF_getCustomPalette) return window.SHUF_getCustomPalette();
+    try{
+      const raw = localStorage.getItem(KEY_CUSTOM);
+      if (raw) return JSON.parse(raw);
+    }catch(e){}
+    return { primary:"#39FF14", accent:"#7CFF5B", glow:"#39FF14", glowFill:"#39FF1440", tint:0.25 };
+  }
+
+  function writeCustom(partial){
+    if (window.SHUF_setCustomPalette) return window.SHUF_setCustomPalette(partial);
+    const cur = readCustom();
+    const next = Object.assign({}, cur, partial);
+    try{ localStorage.setItem(KEY_CUSTOM, JSON.stringify(next)); }catch(e){}
+    return next;
+  }
+
+  function applyName(name){
+    if (window.SHUF_applyPaletteByName) window.SHUF_applyPaletteByName(name);
+    else try{ localStorage.setItem(KEY_NAME, name); }catch(e){}
+  }
+
+  function findPaletteSelect(){
+    const presets = window.SHUF_PRESETS ? Object.keys(window.SHUF_PRESETS) : [];
+    const selects = Array.from(document.querySelectorAll("select"));
+    for (const s of selects){
+      const opts = Array.from(s.options || []).map(o => (o.value || o.textContent || "").trim());
+      if (presets.some(p => opts.includes(p))) return s;
+    }
+    return document.querySelector('select[id*="palette" i],select[name*="palette" i]') || null;
+  }
+
+  function ensureCustomOption(sel){
+    if (!sel) return;
+    const has = Array.from(sel.options).some(o => (o.value || o.textContent) === "Custom");
+    if (!has){
+      const opt = document.createElement("option");
+      opt.value = "Custom";
+      opt.textContent = "Custom";
+      sel.appendChild(opt);
+    }
+  }
+
+  function makeRow(label, input){
+    const row = el("div", {"class":"shuf-pal-row"});
+    row.appendChild(el("label", {"class":"shuf-pal-label", "text":label}));
+    row.appendChild(input);
+    return row;
+  }
+
+  function buildPanel(sel){
+    ensureStyles();
+
+    const panel = el("div", { id: "shufCustomPalettePanel" });
+    const err = el("div", {
+      id:"shufCustomPaletteError",
+      "class":"shuf-pal-error",
+      "text":"One or more hex values are invalid. Use #RGB, #RRGGBB, and Glow fill may also use #RRGGBBAA."
+    });
+
+    const inPrimary  = el("input", { type:"text", placeholder:"#RRGGBB" });
+    const inAccent   = el("input", { type:"text", placeholder:"#RRGGBB" });
+    const inGlow     = el("input", { type:"text", placeholder:"#RRGGBB" });
+    const inGlowFill = el("input", { type:"text", placeholder:"#RRGGBB or #RRGGBBAA" });
+    const tint       = el("input", { type:"range", min:"0", max:"1", step:"0.01" });
+
+    panel.appendChild(makeRow("Primary", inPrimary));
+    panel.appendChild(makeRow("Accent", inAccent));
+    panel.appendChild(makeRow("Glow", inGlow));
+    panel.appendChild(makeRow("Glow fill", inGlowFill));
+    panel.appendChild(makeRow("Tint", tint));
+    panel.appendChild(el("div", {"class":"shuf-pal-help", "text":"Custom palette is saved locally in this browser."}));
+    panel.appendChild(err);
+
+    const cur = readCustom();
+    inPrimary.value  = cur.primary  || "";
+    inAccent.value   = cur.accent   || "";
+    inGlow.value     = cur.glow     || "";
+    inGlowFill.value = cur.glowFill || "";
+    tint.value       = String(cur.tint ?? 0.25);
+
+    let tmr = null;
+    function scheduleApply(){
+      if (tmr) clearTimeout(tmr);
+      tmr = setTimeout(applyNow, 80);
+    }
+
+    function applyNow(){
+      const p  = normHex(inPrimary.value);
+      const a  = normHex(inAccent.value);
+      const g  = normHex(inGlow.value);
+      const gf = normHex6or8(inGlowFill.value);
+      const tv = clamp01(tint.value);
+
+      const ok = !!p && !!a && !!g && !!gf;
+      err.style.display = ok ? "none" : "block";
+
+      const partial = { tint: tv };
+      if (p)  partial.primary  = p;
+      if (a)  partial.accent   = a;
+      if (g)  partial.glow     = g;
+      if (gf) partial.glowFill = gf;
+
+      writeCustom(partial);
+
+      if (sel && sel.value === "Custom"){
+        applyName("Custom");
+      }
+    }
+
+    [inPrimary, inAccent, inGlow, inGlowFill].forEach(inp => {
+      inp.addEventListener("input", scheduleApply);
+      inp.addEventListener("change", scheduleApply);
+    });
+    tint.addEventListener("input", scheduleApply);
+    tint.addEventListener("change", scheduleApply);
+
+    return panel;
+  }
+
+  function attach(){
+    const sel = findPaletteSelect();
+    if (!sel) return;
+
+    ensureCustomOption(sel);
+
+    let panel = document.getElementById("shufCustomPalettePanel");
+    if (!panel){
+      panel = buildPanel(sel);
+      sel.insertAdjacentElement("afterend", panel);
+    }
+
+    function refresh(){
+      panel.style.display = (sel.value === "Custom") ? "" : "none";
+    }
+
+    sel.addEventListener("change", () => {
+      if (sel.value === "Custom"){
+        const cur = readCustom();
+        writeCustom(cur);
+        applyName("Custom");
+      } else {
+        applyName(sel.value);
+      }
+      refresh();
+    });
+
+    refresh();
+  }
+
+  if (document.readyState === "loading"){
+    document.addEventListener("DOMContentLoaded", () => setTimeout(attach, 0));
+  } else {
+    setTimeout(attach, 0);
+  }
+})();
