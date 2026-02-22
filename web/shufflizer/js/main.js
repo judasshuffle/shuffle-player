@@ -11,9 +11,18 @@ const audioEl = document.getElementById("audio");
 // Stream URL:
 // - Normal LAN use: http://<this-host>:8001/stream.mp3
 // - Cloudflare quick tunnel: same-origin /stream.mp3 (proxied by 8091 server)
-audioEl.src = /trycloudflare\.com$/i.test(location.hostname)
-  ? new URL("/stream.mp3", location.href).toString()
-  : `http://${location.hostname}:8001/stream.mp3`;
+// Stream URL logic with optional override
+(function(){
+  const override = localStorage.getItem("shufflizer.stream.override");
+  if (override && override.trim()) {
+    audioEl.src = override.trim();
+    return;
+  }
+
+  audioEl.src = /trycloudflare\.com$/i.test(location.hostname)
+    ? new URL("/stream.mp3", location.href).toString()
+    : `http://${location.hostname}:8001/stream.mp3`;
+})();
 audioEl.load();
 
 const ui = initUI();

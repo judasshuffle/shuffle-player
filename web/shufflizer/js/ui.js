@@ -592,3 +592,50 @@ if (document.readyState === "loading") {
     retryAttach();
   }
 })();
+
+
+// STREAM_OVERRIDE_UI
+(function(){
+  function addStreamOverrideUI(){
+    const panel = document.querySelector(".menu") || document.body;
+    if (!panel) return;
+
+    if (document.getElementById("streamOverrideInput")) return;
+
+    const wrap = document.createElement("div");
+    wrap.style.marginTop = "10px";
+
+    const label = document.createElement("label");
+    label.textContent = "Custom Stream URL (optional)";
+    label.style.display = "block";
+    label.style.fontSize = "12px";
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.id = "streamOverrideInput";
+    input.placeholder = "https://example.com/stream.mp3";
+    input.style.width = "100%";
+    input.style.marginTop = "4px";
+    input.value = localStorage.getItem("shufflizer.stream.override") || "";
+
+    input.addEventListener("change", () => {
+      const v = input.value.trim();
+      if (v) {
+        localStorage.setItem("shufflizer.stream.override", v);
+      } else {
+        localStorage.removeItem("shufflizer.stream.override");
+      }
+      alert("Stream URL saved. Reload page to apply.");
+    });
+
+    wrap.appendChild(label);
+    wrap.appendChild(input);
+    panel.appendChild(wrap);
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", addStreamOverrideUI);
+  } else {
+    addStreamOverrideUI();
+  }
+})();
