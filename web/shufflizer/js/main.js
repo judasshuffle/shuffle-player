@@ -264,3 +264,42 @@ startNowPlaying({
   arm();
 })();
 // SHUFFLIZER_NP_TO_UI
+
+
+// --- Voice flash overlay (poll voice_last.json) ---
+(function voiceFlashInit(){
+  const el = document.getElementById("voiceFlash");
+  if (!el) return;
+
+  let lastTs = null;
+  let hideTimer = null;
+
+  async function tick(){
+    try{
+      const r = await fetch("voice_last.json?_=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) return;
+      const j = await r.json();
+      if (!j || !j.ts) return;
+      if (j.ts === lastTs) return;
+      lastTs = j.ts;
+
+      let msg = "";
+      if (j.text) msg += `You: ${j.text}`;
+      if (j.matched) msg += `<br><span style="opacity:.9">Matched: ${j.matched}</span>`;
+      if (typeof j.tracks === "number") msg += ` <span style="opacity:.9">(${j.tracks} queued)</span>`;
+      if (!msg) return;
+
+      el.innerHTML = msg;
+      el.style.display = "block";
+      el.style.opacity = "1";
+
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => {
+        el.style.opacity = "0";
+        setTimeout(()=>{ el.style.display = "none"; }, 250);
+      }, 3200);
+    }catch(e){}
+  }
+
+  setInterval(tick, 500);
+})();

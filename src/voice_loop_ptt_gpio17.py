@@ -4,6 +4,7 @@ import os
 import sys
 import socket
 import json
+from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import random
@@ -18,6 +19,21 @@ AUDIO_FILE = "utterance.wav"
 ARTISTS_FILE = "artists.txt"
 MUSIC_ROOT = "/mnt/lossless"
 PLAYLIST_SECONDS = 3600
+
+VOICE_STATUS_PATH = os.environ.get(
+    "VOICE_STATUS_PATH",
+    "/home/dan/shuffle-player/web/shufflizer/voice_last.json"
+)
+
+def write_voice_status(**fields):
+    try:
+        payload = {"ts": datetime.utcnow().isoformat(timespec="seconds") + "Z"}
+        payload.update(fields)
+        Path(VOICE_STATUS_PATH).write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+    except Exception:
+        # Never let UI logging break the voice loop
+        pass
+
 
 
 MPV_IPC_SOCK = os.environ.get("MPV_IPC_SOCK", "/tmp/radio_mpv.sock")
@@ -186,6 +202,8 @@ def play_artist_sqlite(artist_name: str):
     n = enqueue_next_mpv(playlist_paths)
     if n:
         print(f"Queued NEXT into mpv: {n} track(s)", flush=True)
+        write_voice_status(state="queued", text=text, matched=artist_name, tracks=n)
+        write_voice_status(state="queued", matched=artist_name, tracks=n)
     else:
         print("[WARN] Nothing queued (mpv socket missing?)", flush=True)
 def play_random_sqlite():
@@ -231,6 +249,8 @@ def main():
         record_audio()
         text = transcribe(asr)
         print("You: " + text)
+        write_voice_status(state="heard", text=text)
+        write_voice_status(state="heard", text=text)
         t = normalize(text)
         if t in {"play some music", "play music", "play some", "play something", "surprise me"}:
             play_random_sqlite()
