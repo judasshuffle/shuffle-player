@@ -3,8 +3,10 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse
 import json, os, subprocess
 
-ROOT = "/home/dan/shuffle-player/web/public"
-PORT = 8090
+ROOT = "/home/dan/shuffle-player/web/shufflizer"
+DASH_DIR = "/home/dan/shuffle-player/web/public"
+SHUFF_DIR = "/home/dan/shuffle-player/web/shufflizer"
+PORT = 8091
 
 SERVICES = {
     "icecast": "icecast2.service",
@@ -24,6 +26,51 @@ def is_active(service):
     return (r.returncode == 0) and (r.stdout.strip() == "active")
 
 class Handler(SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=ROOT, **kwargs)
+
+    def _maybe_serve_dashboard(self):
+        if self.path == '/control':
+            self.send_response(301)
+            self.send_header('Location', '/control/')
+            self.end_headers()
+            return True
+        if self.path.startswith('/control/'):
+            old_dir = getattr(self, 'directory', ROOT)
+            old_path = self.path
+            try:
+                self.directory = DASH_DIR
+                self.path = self.path[len('/control'):] or '/'
+                super().do_GET()
+            finally:
+                self.directory = old_dir
+                self.path = old_path
+            return True
+        return False
+
+    def _maybe_serve_shufflizer(self):
+        # Serve /shufflizer/* from SHUFF_DIR while keeping dashboard at /
+        if self.path == '/shufflizer':
+            self.send_response(301)
+            self.send_header('Location', '/shufflizer/')
+            self.end_headers()
+            return True
+        if self.path.startswith('/shufflizer/'):
+            old_dir = getattr(self, 'directory', ROOT)
+            old_path = self.path
+            try:
+                self.directory = SHUFF_DIR
+                self.path = self.path[len('/shufflizer'):] or '/'
+                super().do_GET()
+            finally:
+                self.directory = old_dir
+                self.path = old_path
+            return True
+        return False
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=ROOT, **kwargs)
+
     def _json(self, obj, code=200):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -32,8 +79,43 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_POST(self):
+
+        u = urlparse(self.path)
+
+
+        if u.path == "/control/next":
+
+            try:
+
+                sock_path = "/tmp/radio_mpv.sock"
+
+                cmd = '{"command":["playlist-next","force"]}\n'.encode("utf-8")
+
+                import socket
+
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+
+                    c.connect(sock_path)
+
+                    c.sendall(cmd)
+
+                return self._json({"ok": True})
+
+            except Exception as e:
+
+                return self._json({"ok": False, "error": str(e)}, code=500)
+
+
+        return self.send_error(404, "Not found")
+
+
     def do_GET(self):
         u = urlparse(self.path)
+
+        # Static mount: /shufflizer/*
+        if self._maybe_serve_shufflizer():
+            return
 
         if u.path == "/api/cmd/shuffle":
             try:
