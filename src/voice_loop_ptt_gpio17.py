@@ -278,11 +278,13 @@ def main():
 
             print(f"Picked {len(playlist_paths)} tracks (~{int(total)}s)")
             stop_current()
-            current_player = subprocess.Popen(["mpv",
-                "--no-video",
-                "--shuffle",
-                f"--playlist={m3u}"
-            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            print(f"Queueing NEXT (decade/year): {label} {artist} ({len(playlist_paths)} tracks)", flush=True)
+            n = enqueue_next_mpv(playlist_paths)
+            if n:
+                print(f"Queued NEXT into mpv: {n} track(s)", flush=True)
+            else:
+                print("[WARN] Nothing queued (mpv socket missing?)", flush=True)
+
         else:
             play_artist_sqlite(artist)
 
