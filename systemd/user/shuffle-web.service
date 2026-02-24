@@ -1,0 +1,15 @@
+[Unit]
+Description=Shuffle Shufflizer Web Server (8091)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/shuffle-player
+ExecStart=/usr/bin/python3 -m http.server 8091 --bind 0.0.0.0 --directory %h/shuffle-player/web/shufflizer
+Restart=on-failure
+RestartSec=2
+# keep logs in journal; view with: journalctl --user -u shuffle-web -f
+
+[Install]
+WantedBy=default.target
