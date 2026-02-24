@@ -291,6 +291,9 @@ startNowPlaying({
 
       el.innerHTML = msg;
       el.style.display = "block";
+      el.classList.remove("voice-on");
+      void el.offsetWidth; // retrigger CSS animations
+      el.classList.add("voice-on");
       el.style.opacity = "1";
 
       clearTimeout(hideTimer);
