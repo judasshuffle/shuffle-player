@@ -44,7 +44,7 @@ Shuffle can broadcast as a public internet radio station using Icecast.
 
 Public stream:
 
-http://shuffle.tplinkdns.com:8001/stream.mp3
+
 
 Works with:
 
@@ -98,33 +98,33 @@ MPV Status
 Icecast Status
 
 Stream Mode
-[ Public MP3 ]   [ HD Lossless ]
+\[ Public MP3 ]   \[ HD Lossless ]
 
 Radio Control
-[ Start Radio ]  [ Stop Radio ]
+\[ Start Radio ]  \[ Stop Radio ]
 Architecture
-                Voice Commands
-               (faster-whisper)
-                      │
-                      ▼
-                 Shuffle Player
-                      │
-                      ▼
-                     mpv
-                      │
-                      ▼
-                Audio Output
-                      │
-        ┌─────────────┴─────────────┐
-        ▼                           ▼
- Icecast Internet Stream       Snapcast Lossless
-      stream.mp3              Shuffle Listener
+Voice Commands
+(faster-whisper)
+│
+▼
+Shuffle Player
+│
+▼
+mpv
+│
+▼
+Audio Output
+│
+┌─────────────┴─────────────┐
+▼                           ▼
+Icecast Internet Stream       Snapcast Lossless
+stream.mp3              Shuffle Listener
 Project Structure
 shuffle-player
 │
 ├─ src
-│   ├─ voice_loop.py
-│   ├─ build_jukebox_index.py
+│   ├─ voice\_loop.py
+│   ├─ build\_jukebox\_index.py
 │
 ├─ web
 │   └─ control panel
@@ -143,11 +143,11 @@ ls -1 /mnt/lossless > artists.txt
 
 Build the music index:
 
-python build_jukebox_index.py
+python build\_jukebox\_index.py
 
 Start the voice player:
 
-python voice_loop.py
+python voice\_loop.py
 Example voice commands
 play Bob Dylan
 play Bob Dylan 80s
@@ -171,4 +171,5 @@ It is intentionally experimental and opinionated rather than a polished commerci
 
 License
 
-MIT License 
+MIT License
+
