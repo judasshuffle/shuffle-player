@@ -1,72 +1,342 @@
 #!/usr/bin/env python3
+
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from urllib.parse import urlparse
-import json, os, subprocess
+import json
+import os
+import subprocess
+import socket
 
 ROOT = "/home/dan/shuffle-player/web/shufflizer"
-DASH_DIR = "/home/dan/shuffle-player/web/public"
-SHUFF_DIR = "/home/dan/shuffle-player/web/shufflizer"
 PORT = 8091
+MPV_SOCKET = "/tmp/radio_mpv.sock"
+NOWPLAYING_JSON = "/home/dan/shuffle-player/web/shufflizer/nowplaying.json"
+RESYNC_SCRIPT = "/home/dan/shuffle-player/scripts/resync_jukebox_db.sh"
 
 SERVICES = {
     "icecast": "icecast2.service",
-    "radio": "shuffle-radio.service",
-    "player": "shuffle-player.service",
 }
 
 GROUPS = {
-    "everything": ["icecast", "radio", "player"],
+    "everything": ["icecast"],
 }
+
 
 def run(cmd):
     return subprocess.run(cmd, capture_output=True, text=True)
+
 
 def is_active(service):
     r = run(["systemctl", "is-active", service])
     return (r.returncode == 0) and (r.stdout.strip() == "active")
 
+
+def mpv_command(command):
+    msg = json.dumps({"command": command}) + "\n"
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.connect(MPV_SOCKET)
+        s.sendall(msg.encode("utf-8"))
+
+
+def read_nowplaying():
+    if not os.path.exists(NOWPLAYING_JSON):
+        return {"artist": "", "title": "", "album": "", "text": "Nothing loaded"}
+
+    try:
+        with open(NOWPLAYING_JSON, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        return {"artist": "", "title": "", "album": "", "text": f"Now playing read error: {e}"}
+
+    artist = str(data.get("artist", "")).strip()
+    title = str(data.get("title", "")).strip()
+    album = str(data.get("album", "")).strip()
+
+    if artist and title:
+        text = f"{artist} — {title}"
+    else:
+        text = title or artist or "Nothing loaded"
+
+    return {
+        "artist": artist,
+        "title": title,
+        "album": album,
+        "text": text,
+    }
+
+
+def get_library_stats():
+    db = "/home/dan/jukebox.db"
+    music_root = "/mnt/lossless"
+
+    result = {
+        "db_path": db,
+        "music_root": music_root,
+        "track_count": None,
+    }
+
+    if not os.path.exists(db):
+        return result
+
+    try:
+        import sqlite3
+        con = sqlite3.connect(db)
+        cur = con.cursor()
+        result["track_count"] = cur.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+        con.close()
+    except Exception:
+        pass
+
+    return result
+
+
+DASHBOARD_HTML = """
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shuffle Control</title>
+
+<style>
+body{
+  background:#0f1117;
+  color:#e6e6e6;
+  font-family:system-ui;
+  margin:40px;
+}
+
+h1{
+  margin-bottom:30px;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+  gap:20px;
+}
+
+.card{
+  background:#1b1f2a;
+  padding:20px;
+  border-radius:12px;
+}
+
+.card-wide{
+  grid-column:1 / -1;
+}
+
+button{
+  background:#2b3142;
+  border:none;
+  color:white;
+  padding:10px 14px;
+  border-radius:6px;
+  margin:4px;
+  cursor:pointer;
+}
+
+button:hover{
+  background:#3a4156;
+}
+
+.ok{
+  color:#00ff99;
+  font-weight:bold;
+}
+
+.bad{
+  color:#ff4d4d;
+  font-weight:bold;
+}
+
+.muted{
+  opacity:.8;
+}
+
+.link{
+  color:#4db6ff;
+  text-decoration:none;
+}
+
+.link:hover{
+  text-decoration:underline;
+}
+
+.value{
+  margin-top:8px;
+  font-size:1.05rem;
+}
+
+.small{
+  font-size:.92rem;
+  opacity:.85;
+  margin-top:6px;
+}
+
+#libraryResult{
+  margin-top:12px;
+  white-space:pre-wrap;
+  font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size:.92rem;
+  opacity:.92;
+}
+</style>
+</head>
+
+<body>
+
+<h1>Shuffle Control</h1>
+
+<div class="grid">
+
+  <div class="card card-wide">
+    <h3>Now Playing</h3>
+    <div id="npText" class="value">Loading…</div>
+    <div id="npAlbum" class="small"></div>
+  </div>
+
+  <div class="card">
+    <h3>Everything</h3>
+    <button onclick="grp('start','everything')">Start Everything</button>
+    <button onclick="grp('stop','everything')">Stop Everything</button>
+    <button onclick="grp('restart','everything')">Restart Everything</button>
+    <div id="everything" class="value"></div>
+  </div>
+
+  <div class="card">
+    <h3>Shuffle Player</h3>
+    <button onclick="shuffleAll()">Shuffle All</button>
+    <button onclick="nextTrack()">Next Track</button>
+    <button onclick="prevTrack()">Previous Track</button>
+  </div>
+
+  <div class="card">
+    <h3>Icecast</h3>
+    <button onclick="act('start','icecast')">Start</button>
+    <button onclick="act('stop','icecast')">Stop</button>
+    <button onclick="act('restart','icecast')">Restart</button>
+    <div id="icecast" class="value"></div>
+  </div>
+
+  <div class="card">
+    <h3>Library</h3>
+    <button onclick="updateLibrary()">Update Music Library</button>
+    <button onclick="updateLibrary()">Clean Missing Tracks</button>
+    <button disabled>Rebuild Database</button>
+
+    <div class="small">Music root: <span id="musicRoot" class="muted"></span></div>
+    <div class="small">Database: <span id="dbPath" class="muted"></span></div>
+    <div class="small">Tracks indexed: <span id="trackCount" class="muted">—</span></div>
+
+    <div id="libraryResult"></div>
+  </div>
+
+  <div class="card">
+    <h3>Stream Mode</h3>
+    <button>Public MP3</button>
+    <button>HD Lossless</button>
+  </div>
+
+  <div class="card">
+    <h3>System</h3>
+    <button>Restart Icecast</button>
+    <button>Reboot Pi</button>
+    <button>Shutdown Pi</button>
+  </div>
+
+  <div class="card">
+    <a class="link" href="/index.html" target="_blank">Open Shufflizer</a>
+  </div>
+
+</div>
+
+<script>
+
+async function refreshStatus(){
+  const r = await fetch('/api/status');
+  const j = await r.json();
+
+  for(const k in j){
+    const el = document.getElementById(k);
+    if(!el) continue;
+    el.textContent = j[k] ? 'running' : 'stopped';
+    el.className = 'value ' + (j[k] ? 'ok' : 'bad');
+  }
+
+  const all = !!j.icecast;
+  const elAll = document.getElementById('everything');
+  elAll.textContent = all ? 'running' : 'stopped';
+  elAll.className = 'value ' + (all ? 'ok' : 'bad');
+}
+
+async function refreshNowPlaying(){
+  const r = await fetch('/api/nowplaying');
+  const j = await r.json();
+
+  document.getElementById('npText').textContent = j.text || 'Nothing loaded';
+  document.getElementById('npAlbum').textContent = j.album ? ('Album: ' + j.album) : '';
+}
+
+async function refreshLibraryStats(){
+  const r = await fetch('/api/library/stats');
+  const j = await r.json();
+
+  document.getElementById('musicRoot').textContent = j.music_root || '';
+  document.getElementById('dbPath').textContent = j.db_path || '';
+  document.getElementById('trackCount').textContent =
+    (j.track_count === null || j.track_count === undefined) ? '—' : j.track_count;
+}
+
+async function refreshAll(){
+  await refreshStatus();
+  await refreshNowPlaying();
+  await refreshLibraryStats();
+}
+
+async function act(action,key){
+  await fetch('/api/'+action+'/'+key);
+  refreshStatus();
+}
+
+async function grp(action,group){
+  await fetch('/api/group/'+action+'/'+group);
+  refreshStatus();
+}
+
+async function shuffleAll(){
+  await fetch('/control/shuffle',{method:'POST'});
+}
+
+async function nextTrack(){
+  await fetch('/control/next',{method:'POST'});
+}
+
+async function prevTrack(){
+  await fetch('/control/prev',{method:'POST'});
+}
+
+async function updateLibrary(){
+  const out = document.getElementById('libraryResult');
+  out.textContent = 'Running library update…';
+
+  const r = await fetch('/api/library/resync', {method:'POST'});
+  const j = await r.json();
+
+  out.textContent = j.ok ? j.output : ('Error: ' + (j.error || 'Unknown error'));
+  await refreshLibraryStats();
+}
+
+refreshAll();
+setInterval(refreshAll, 3000);
+
+</script>
+</body>
+</html>
+"""
+
+
 class Handler(SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=ROOT, **kwargs)
-
-    def _maybe_serve_dashboard(self):
-        if self.path == '/control':
-            self.send_response(301)
-            self.send_header('Location', '/control/')
-            self.end_headers()
-            return True
-        if self.path.startswith('/control/'):
-            old_dir = getattr(self, 'directory', ROOT)
-            old_path = self.path
-            try:
-                self.directory = DASH_DIR
-                self.path = self.path[len('/control'):] or '/'
-                super().do_GET()
-            finally:
-                self.directory = old_dir
-                self.path = old_path
-            return True
-        return False
-
-    def _maybe_serve_shufflizer(self):
-        # Serve /shufflizer/* from SHUFF_DIR while keeping dashboard at /
-        if self.path == '/shufflizer':
-            self.send_response(301)
-            self.send_header('Location', '/shufflizer/')
-            self.end_headers()
-            return True
-        if self.path.startswith('/shufflizer/'):
-            old_dir = getattr(self, 'directory', ROOT)
-            old_path = self.path
-            try:
-                self.directory = SHUFF_DIR
-                self.path = self.path[len('/shufflizer'):] or '/'
-                super().do_GET()
-            finally:
-                self.directory = old_dir
-                self.path = old_path
-            return True
-        return False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -80,68 +350,61 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
-
         u = urlparse(self.path)
 
-
-        if u.path == "/control/next":
-
-            try:
-
-                sock_path = "/tmp/radio_mpv.sock"
-
-                cmd = '{"command":["playlist-next","force"]}\n'.encode("utf-8")
-
-                import socket
-
-                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
-
-                    c.connect(sock_path)
-
-                    c.sendall(cmd)
-
+        try:
+            if u.path == "/control/next":
+                mpv_command(["playlist-next", "force"])
                 return self._json({"ok": True})
 
-            except Exception as e:
+            if u.path == "/control/prev":
+                mpv_command(["playlist-prev", "force"])
+                return self._json({"ok": True})
 
-                return self._json({"ok": False, "error": str(e)}, code=500)
+            if u.path == "/control/shuffle":
+                mpv_command(["playlist-shuffle"])
+                return self._json({"ok": True})
 
+            if u.path == "/api/library/resync":
+                if not os.path.exists(RESYNC_SCRIPT):
+                    return self._json({"ok": False, "error": f"Script not found: {RESYNC_SCRIPT}"}, 500)
 
-        return self.send_error(404, "Not found")
+                r = run([RESYNC_SCRIPT])
+                ok = (r.returncode == 0)
+                text = (r.stdout or "").strip()
+                err = (r.stderr or "").strip()
 
+                if ok:
+                    return self._json({"ok": True, "output": text or "Library update complete."})
+
+                return self._json({"ok": False, "error": err or text or "Library update failed."}, 500)
+
+        except Exception as e:
+            return self._json({"ok": False, "error": str(e)}, 500)
+
+        return self.send_error(404)
 
     def do_GET(self):
         u = urlparse(self.path)
-
-        # Static mount: /shufflizer/*
-        if self._maybe_serve_shufflizer():
-            return
-
-        if u.path == "/api/cmd/shuffle":
-            try:
-                fifo = "/tmp/shuffle_cmd.fifo"
-                msg = "shuffle all\n".encode("utf-8")
-
-                fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
-                try:
-                    os.write(fd, msg)
-                finally:
-                    os.close(fd)
-                return self._json({"ok": True})
-            except Exception as e:
-                return self._json({"ok": False, "error": str(e)}, 500)
-
 
         if u.path == "/api/status":
             status = {k: is_active(v) for k, v in SERVICES.items()}
             return self._json(status)
 
+        if u.path == "/api/nowplaying":
+            return self._json(read_nowplaying())
+
+        if u.path == "/api/library/stats":
+            return self._json(get_library_stats())
+
         if u.path.startswith("/api/") and not u.path.startswith("/api/group/"):
             parts = u.path.strip("/").split("/")
+
             if len(parts) != 3:
                 return self._json({"error": "bad path"}, 400)
 
             _, action, key = parts
+
             if key not in SERVICES:
                 return self._json({"error": "bad key"}, 400)
 
@@ -150,14 +413,17 @@ class Handler(SimpleHTTPRequestHandler):
 
             svc = SERVICES[key]
             r = run(["sudo", "systemctl", action, svc])
+
             return self._json({"ok": r.returncode == 0, "active": is_active(svc)})
 
         if u.path.startswith("/api/group/"):
             parts = u.path.strip("/").split("/")
+
             if len(parts) != 4:
                 return self._json({"error": "bad group path"}, 400)
 
             _, _, action, group = parts
+
             if group not in GROUPS:
                 return self._json({"error": "bad group"}, 400)
 
@@ -165,6 +431,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self._json({"error": "bad action"}, 400)
 
             ok = True
+
             for key in GROUPS[group]:
                 svc = SERVICES[key]
                 r = run(["sudo", "systemctl", action, svc])
@@ -173,93 +440,8 @@ class Handler(SimpleHTTPRequestHandler):
 
             return self._json({"ok": ok, "group": group}, 200 if ok else 500)
 
-        if u.path == "/" or u.path == "/index.html":
-            html = """<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>Shuffle Control</title>
-<style>
-body{font-family:system-ui;margin:20px}
-button{padding:10px;margin:5px}
-.ok{color:green}
-.bad{color:red}
-</style>
-</head>
-<body>
-<h2>Shuffle Control</h2>
-
-<h3>Everything</h3>
-<button onclick="grp('start','everything')">Start Everything</button>
-<button onclick="grp('stop','everything')">Stop Everything</button>
-<button onclick="grp('restart','everything')">Restart Everything</button>
-<span id="everything"></span>
-
-<hr>
-
-<h3>Shuffle Player</h3>
-<button onclick="cmdShuffle()">Shuffle All</button>
-
-<button onclick="act('start','player')">Start</button>
-<button onclick="act('stop','player')">Stop</button>
-<button onclick="act('restart','player')">Restart</button>
-<span id="player"></span>
-
-<h3>Icecast</h3>
-<button onclick="act('start','icecast')">Start</button>
-<button onclick="act('stop','icecast')">Stop</button>
-<button onclick="act('restart','icecast')">Restart</button>
-<span id="icecast"></span>
-
-<h3>Radio Encoder</h3>
-<button onclick="act('start','radio')">Start</button>
-<button onclick="act('stop','radio')">Stop</button>
-<button onclick="act('restart','radio')">Restart</button>
-<span id="radio"></span>
-
-<hr>
-<a href="/shufflizer/" target="_blank">Open Shufflizer</a>
-
-<script>
-async function refresh(){
-  const r = await fetch('/api/status');
-  const j = await r.json();
-
-  for (const k in j){
-    const el = document.getElementById(k);
-    el.textContent = j[k] ? ' running' : ' stopped';
-    el.className = j[k] ? 'ok' : 'bad';
-  }
-
-  const all = (j.icecast && j.radio && j.player);
-  const elAll = document.getElementById('everything');
-  elAll.textContent = all ? ' running' : ' stopped';
-  elAll.className = all ? 'ok' : 'bad';
-}
-
-async function act(action,key){
-  await fetch('/api/'+action+'/'+key);
-  refresh();
-}
-
-async function cmdShuffle(){
-  await fetch('/api/cmd/shuffle');
-  refresh();
-}
-
-async function grp(action,group){
-  await fetch('/api/group/'+action+'/'+group);
-  refresh();
-}
-
-refresh();
-setInterval(refresh,3000);
-</script>
-
-</body>
-</html>
-"""
-            data = html.encode()
+        if u.path == "/" or u.path == "/control":
+            data = DASHBOARD_HTML.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(data)))
@@ -268,6 +450,7 @@ setInterval(refresh,3000);
             return
 
         return super().do_GET()
+
 
 if __name__ == "__main__":
     os.chdir(ROOT)
