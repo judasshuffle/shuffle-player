@@ -7,12 +7,15 @@ import os
 import subprocess
 import socket
 import urllib.request
+import re
+import time
 
 ROOT = "/home/dan/shuffle-player/web/shufflizer"
 PORT = 8091
 MPV_SOCKET = "/tmp/radio_mpv.sock"
 NOWPLAYING_JSON = "/home/dan/shuffle-player/web/shufflizer/nowplaying.json"
 RESYNC_SCRIPT = "/home/dan/shuffle-player/scripts/resync_jukebox_db.sh"
+COVER_CACHE = os.path.join(ROOT, "nowplaying_cover.jpg")
 
 SERVICES = {
     "icecast": "icecast2.service",
@@ -24,6 +27,15 @@ SERVICES = {
 GROUPS = {
     "everything": ["icecast"],
 }
+
+AUDIO_ENV = {
+    **os.environ,
+    "XDG_RUNTIME_DIR": "/run/user/1000",
+    "PULSE_SERVER": "unix:/run/user/1000/pulse/native",
+}
+
+_LAST_COVER_TRACK = None
+_LAST_COVER_URL = ""
 
 
 def run(cmd):
@@ -55,6 +67,289 @@ def icecast_mp3_active():
         pass
 
     return False
+
+
+def resolve_art_url(data):
+    candidates = (
+        "cover_url",
+        "art_url",
+        "cover",
+        "art",
+        "image",
+        "album_art",
+    )
+
+    for key in candidates:
+        raw = str(data.get(key, "")).strip()
+        if not raw:
+            continue
+
+        if raw.startswith(("http://", "https://", "data:")):
+            return raw
+
+        if raw.startswith("/"):
+            return raw
+
+        candidate = os.path.join(ROOT, raw)
+        if os.path.exists(candidate):
+            return "/" + raw.replace(os.sep, "/")
+
+        if os.path.isabs(raw) and os.path.exists(raw):
+            try:
+                rel = os.path.relpath(raw, ROOT)
+                if not rel.startswith(".."):
+                    return "/" + rel.replace(os.sep, "/")
+            except Exception:
+                pass
+
+    return ""
+
+
+def mpv_ipc(command):
+    request_id = int(time.time() * 1000) % 1000000000
+    payload = json.dumps({"command": command, "request_id": request_id}) + "\n"
+
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+        s.settimeout(2)
+        s.connect(MPV_SOCKET)
+        s.sendall(payload.encode("utf-8"))
+
+        buf = b""
+        while True:
+            chunk = s.recv(4096)
+            if not chunk:
+                break
+            buf += chunk
+
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    msg = json.loads(line.decode("utf-8", errors="replace"))
+                except Exception:
+                    continue
+                if msg.get("request_id") == request_id:
+                    return msg
+
+    return None
+
+
+def mpv_get_property(prop):
+    try:
+        msg = mpv_ipc(["get_property", prop])
+        if msg and msg.get("error") == "success":
+            return msg.get("data")
+    except Exception:
+        pass
+    return None
+
+
+def get_current_track_path(nowplaying_data=None):
+    path_candidates = []
+    if isinstance(nowplaying_data, dict):
+        for key in ("path", "file", "filename"):
+            raw = str(nowplaying_data.get(key, "")).strip()
+            if raw:
+                path_candidates.append(raw)
+
+    mpv_path = mpv_get_property("path")
+    if isinstance(mpv_path, str) and mpv_path.strip():
+        path_candidates.insert(0, mpv_path.strip())
+
+    workdir = mpv_get_property("working-directory")
+    if isinstance(workdir, str):
+        workdir = workdir.strip()
+    else:
+        workdir = ""
+
+    for raw in path_candidates:
+        if os.path.isabs(raw) and os.path.exists(raw):
+            return raw
+
+        if workdir:
+            candidate = os.path.abspath(os.path.join(workdir, raw))
+            if os.path.exists(candidate):
+                return candidate
+
+    return ""
+
+
+def find_folder_art(track_path):
+    if not track_path:
+        return ""
+
+    folder = os.path.dirname(track_path)
+    names = (
+        "cover.jpg",
+        "cover.jpeg",
+        "cover.png",
+        "folder.jpg",
+        "folder.jpeg",
+        "folder.png",
+        "front.jpg",
+        "front.jpeg",
+        "front.png",
+    )
+
+    for name in names:
+        candidate = os.path.join(folder, name)
+        if os.path.exists(candidate):
+            try:
+                rel = os.path.relpath(candidate, ROOT)
+                if not rel.startswith(".."):
+                    return "/" + rel.replace(os.sep, "/")
+            except Exception:
+                pass
+
+    return ""
+
+
+def cover_cache_url():
+    if os.path.exists(COVER_CACHE):
+        return f"/nowplaying_cover.jpg?t={int(os.path.getmtime(COVER_CACHE))}"
+    return ""
+
+
+def extract_embedded_cover(track_path):
+    if not track_path or not os.path.exists(track_path):
+        return ""
+
+    try:
+        if os.path.exists(COVER_CACHE):
+            os.remove(COVER_CACHE)
+    except Exception:
+        pass
+
+    cmd = [
+        "/usr/bin/ffmpeg",
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        track_path,
+        "-an",
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        "1",
+        "-c:v",
+        "mjpeg",
+        COVER_CACHE,
+    ]
+
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        if r.returncode == 0 and os.path.exists(COVER_CACHE) and os.path.getsize(COVER_CACHE) > 0:
+            return cover_cache_url()
+    except Exception:
+        pass
+
+    return ""
+
+
+def get_nowplaying_art(nowplaying_data):
+    global _LAST_COVER_TRACK, _LAST_COVER_URL
+
+    explicit = resolve_art_url(nowplaying_data)
+    if explicit:
+        _LAST_COVER_TRACK = None
+        _LAST_COVER_URL = explicit
+        return explicit
+
+    track_path = get_current_track_path(nowplaying_data)
+
+    if track_path and track_path == _LAST_COVER_TRACK:
+        if _LAST_COVER_URL:
+            return _LAST_COVER_URL
+        if os.path.exists(COVER_CACHE):
+            _LAST_COVER_URL = cover_cache_url()
+            return _LAST_COVER_URL
+
+    extracted = extract_embedded_cover(track_path)
+    if extracted:
+        _LAST_COVER_TRACK = track_path
+        _LAST_COVER_URL = extracted
+        return extracted
+
+    folder_art = find_folder_art(track_path)
+    if folder_art:
+        _LAST_COVER_TRACK = track_path
+        _LAST_COVER_URL = folder_art
+        return folder_art
+
+    _LAST_COVER_TRACK = track_path or None
+    _LAST_COVER_URL = ""
+    return ""
+
+
+def db_to_percent(db_value):
+    if db_value is None:
+        return 0
+
+    db_value = max(-60.0, min(0.0, db_value))
+    return int(round(((db_value + 60.0) / 60.0) * 100))
+
+
+def get_vu_levels():
+    cmd = [
+        "/usr/bin/ffmpeg",
+        "-nostdin",
+        "-hide_banner",
+        "-nostats",
+        "-loglevel",
+        "info",
+        "-f",
+        "pulse",
+        "-i",
+        "radio_sink.monitor",
+        "-t",
+        "0.15",
+        "-af",
+        "astats=metadata=0:reset=1:measure_perchannel=Peak_level",
+        "-f",
+        "null",
+        "-",
+    ]
+
+    try:
+        r = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env=AUDIO_ENV,
+        )
+        text = (r.stdout or "") + "\n" + (r.stderr or "")
+        peaks = [float(x) for x in re.findall(r"Peak level dB:\s*(-?\d+(?:\.\d+)?)", text)]
+
+        if len(peaks) >= 2:
+            left_db, right_db = peaks[0], peaks[1]
+        elif len(peaks) == 1:
+            left_db = right_db = peaks[0]
+        else:
+            return {
+                "left": 0,
+                "right": 0,
+                "left_db": None,
+                "right_db": None,
+            }
+
+        return {
+            "left": db_to_percent(left_db),
+            "right": db_to_percent(right_db),
+            "left_db": left_db,
+            "right_db": right_db,
+        }
+
+    except Exception:
+        return {
+            "left": 0,
+            "right": 0,
+            "left_db": None,
+            "right_db": None,
+        }
 
 
 def get_output_status():
@@ -126,13 +421,25 @@ def mpv_command(command):
 
 def read_nowplaying():
     if not os.path.exists(NOWPLAYING_JSON):
-        return {"artist": "", "title": "", "album": "", "text": "Nothing loaded"}
+        return {
+            "artist": "",
+            "title": "",
+            "album": "",
+            "text": "Nothing loaded",
+            "art_url": "",
+        }
 
     try:
         with open(NOWPLAYING_JSON, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        return {"artist": "", "title": "", "album": "", "text": f"Now playing read error: {e}"}
+        return {
+            "artist": "",
+            "title": "",
+            "album": "",
+            "text": f"Now playing read error: {e}",
+            "art_url": "",
+        }
 
     artist = str(data.get("artist", "")).strip()
     title = str(data.get("title", "")).strip()
@@ -148,6 +455,7 @@ def read_nowplaying():
         "title": title,
         "album": album,
         "text": text,
+        "art_url": get_nowplaying_art(data),
     }
 
 
@@ -233,6 +541,74 @@ button:hover{ background:#3a4156; }
   font-size:.92rem;
   opacity:.92;
 }
+.nowplaying-wrap{
+  display:flex;
+  gap:20px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+}
+.cover-wrap{
+  width:160px;
+  height:160px;
+  border-radius:12px;
+  overflow:hidden;
+  background:#111622;
+  border:1px solid rgba(255,255,255,.08);
+  flex:0 0 160px;
+  position:relative;
+}
+.cover-wrap img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  display:none;
+}
+.cover-placeholder{
+  width:100%;
+  height:100%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:3rem;
+  opacity:.35;
+}
+.np-meta{
+  flex:1 1 320px;
+  min-width:260px;
+}
+.vu-wrap{
+  margin-top:16px;
+}
+.vu-row{
+  display:grid;
+  grid-template-columns:36px 1fr 46px;
+  gap:10px;
+  align-items:center;
+  margin-top:8px;
+}
+.vu-label{
+  font-size:.85rem;
+  opacity:.85;
+}
+.vu-bar{
+  width:100%;
+  height:14px;
+  background:#0d1017;
+  border-radius:999px;
+  overflow:hidden;
+  border:1px solid rgba(255,255,255,.08);
+}
+.vu-fill{
+  height:100%;
+  width:0%;
+  background:linear-gradient(90deg,#00ff99,#ffd166,#ff4d4d);
+  transition:width .08s linear;
+}
+.vu-value{
+  text-align:right;
+  font-size:.85rem;
+  opacity:.8;
+}
 </style>
 </head>
 
@@ -243,8 +619,33 @@ button:hover{ background:#3a4156; }
 
   <div class="card card-wide">
     <h3>Now Playing</h3>
-    <div id="npText" class="value">Loading…</div>
-    <div id="npAlbum" class="small"></div>
+    <div class="nowplaying-wrap">
+      <div class="cover-wrap">
+        <img id="coverArt" alt="Album art">
+        <div id="coverPlaceholder" class="cover-placeholder">♪</div>
+      </div>
+
+      <div class="np-meta">
+        <div id="npText" class="value">Loading…</div>
+        <div id="npAlbum" class="small"></div>
+
+        <div class="vu-wrap">
+          <div class="small">Level</div>
+
+          <div class="vu-row">
+            <div class="vu-label">L</div>
+            <div class="vu-bar"><div id="vuLeft" class="vu-fill"></div></div>
+            <div id="vuLeftVal" class="vu-value">0%</div>
+          </div>
+
+          <div class="vu-row">
+            <div class="vu-label">R</div>
+            <div class="vu-bar"><div id="vuRight" class="vu-fill"></div></div>
+            <div id="vuRightVal" class="vu-value">0%</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -347,6 +748,39 @@ async function refreshNowPlaying(){
 
   document.getElementById('npText').textContent = j.text || 'Nothing loaded';
   document.getElementById('npAlbum').textContent = j.album ? ('Album: ' + j.album) : '';
+
+  const img = document.getElementById('coverArt');
+  const placeholder = document.getElementById('coverPlaceholder');
+
+  if(j.art_url){
+    img.src = j.art_url + (j.art_url.includes('?') ? '&' : '?') + 't=' + Date.now();
+    img.style.display = 'block';
+    placeholder.style.display = 'none';
+  } else {
+    img.removeAttribute('src');
+    img.style.display = 'none';
+    placeholder.style.display = 'flex';
+  }
+}
+
+async function refreshVu(){
+  try {
+    const r = await fetch('/api/vu');
+    const j = await r.json();
+
+    const l = Math.max(0, Math.min(100, j.left || 0));
+    const rr = Math.max(0, Math.min(100, j.right || 0));
+
+    document.getElementById('vuLeft').style.width = l + '%';
+    document.getElementById('vuRight').style.width = rr + '%';
+    document.getElementById('vuLeftVal').textContent = l + '%';
+    document.getElementById('vuRightVal').textContent = rr + '%';
+  } catch(e) {
+    document.getElementById('vuLeft').style.width = '0%';
+    document.getElementById('vuRight').style.width = '0%';
+    document.getElementById('vuLeftVal').textContent = '0%';
+    document.getElementById('vuRightVal').textContent = '0%';
+  }
 }
 
 async function refreshLibraryStats(){
@@ -472,6 +906,7 @@ async function systemCtl(action){
 
 refreshAll();
 setInterval(refreshAll, 3000);
+setInterval(refreshVu, 250);
 </script>
 </body>
 </html>
@@ -559,6 +994,9 @@ class Handler(SimpleHTTPRequestHandler):
 
         if u.path == "/api/nowplaying":
             return self._json(read_nowplaying())
+
+        if u.path == "/api/vu":
+            return self._json(get_vu_levels())
 
         if u.path == "/api/library/stats":
             return self._json(get_library_stats())
