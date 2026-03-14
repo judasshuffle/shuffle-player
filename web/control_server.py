@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import socket
+import urllib.request
 
 ROOT = "/home/dan/shuffle-player/web/shufflizer"
 PORT = 8091
@@ -32,10 +33,29 @@ def run(cmd):
 def is_active(service):
     r = run(["sudo", "systemctl", "is-active", service])
     return (r.returncode == 0) and (r.stdout.strip() == "active")
+def icecast_mp3_active():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8001/status-json.xsl", timeout=2) as r:
+            data = json.loads(r.read().decode())
 
+        src = data.get("icestats", {}).get("source")
+
+        if isinstance(src, list):
+            for s in src:
+                if s.get("listenurl", "").endswith("/stream.mp3"):
+                    return True
+
+        elif isinstance(src, dict):
+            if src.get("listenurl", "").endswith("/stream.mp3"):
+                return True
+
+    except Exception:
+        pass
+
+    return False
 
 def get_output_status():
-    mp3_on = is_active("shuffle-radio.service")
+    mp3_on = icecast_mp3_active()
     snapserver_on = is_active("snapserver.service")
     snapfifo_feed_on = is_active("shuffle-snapfifo-feed.service")
 
