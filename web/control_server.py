@@ -33,6 +33,8 @@ def run(cmd):
 def is_active(service):
     r = run(["sudo", "systemctl", "is-active", service])
     return (r.returncode == 0) and (r.stdout.strip() == "active")
+
+
 def icecast_mp3_active():
     try:
         with urllib.request.urlopen("http://127.0.0.1:8001/status-json.xsl", timeout=2) as r:
@@ -53,6 +55,7 @@ def icecast_mp3_active():
         pass
 
     return False
+
 
 def get_output_status():
     mp3_on = icecast_mp3_active()
@@ -309,9 +312,9 @@ button:hover{ background:#3a4156; }
 
   <div class="card">
     <h3>System</h3>
-    <button>Restart Icecast</button>
-    <button>Reboot Pi</button>
-    <button>Shutdown Pi</button>
+    <button onclick="systemCtl('restart_icecast')">Restart Icecast</button>
+    <button onclick="systemCtl('reboot')">Reboot Pi</button>
+    <button onclick="systemCtl('shutdown')">Shutdown Pi</button>
   </div>
 
   <div class="card">
@@ -368,11 +371,11 @@ async function refreshOutputs(){
   if(j.mp3_stream){
     mp3Status.textContent = 'RUNNING';
     mp3Status.className = 'value ok';
-    mp3Detail.textContent = 'shuffle-radio.service running';
+    mp3Detail.textContent = 'Icecast /stream.mp3 is live';
   } else {
     mp3Status.textContent = 'STOPPED';
     mp3Status.className = 'value bad';
-    mp3Detail.textContent = 'shuffle-radio.service stopped';
+    mp3Detail.textContent = 'Icecast /stream.mp3 not currently mounted';
   }
 
   if(j.snapcast_state === 'running'){
@@ -398,12 +401,12 @@ async function refreshAll(){
 }
 
 async function act(action,key){
-  await fetch('/api/'+action+'/'+key);
+  await fetch('/api/' + action + '/' + key);
   refreshStatus();
 }
 
 async function grp(action,group){
-  await fetch('/api/group/'+action+'/'+group);
+  await fetch('/api/group/' + action + '/' + group);
   refreshStatus();
 }
 
@@ -420,15 +423,15 @@ async function outputCtl(action, output){
 }
 
 async function shuffleAll(){
-  await fetch('/control/shuffle',{method:'POST'});
+  await fetch('/control/shuffle', {method:'POST'});
 }
 
 async function nextTrack(){
-  await fetch('/control/next',{method:'POST'});
+  await fetch('/control/next', {method:'POST'});
 }
 
 async function prevTrack(){
-  await fetch('/control/prev',{method:'POST'});
+  await fetch('/control/prev', {method:'POST'});
 }
 
 async function updateLibrary(){
@@ -440,6 +443,31 @@ async function updateLibrary(){
 
   out.textContent = j.ok ? j.output : ('Error: ' + (j.error || 'Unknown error'));
   await refreshLibraryStats();
+}
+
+async function systemCtl(action){
+  if(action === 'restart_icecast'){
+    const r = await fetch('/api/system/restart-icecast', {method:'POST'});
+    const j = await r.json();
+    if(!j.ok){
+      alert('Restart Icecast failed');
+    }
+    await refreshStatus();
+    return;
+  }
+
+  if(action === 'reboot'){
+    if(confirm('Reboot the Raspberry Pi?')){
+      await fetch('/api/system/reboot', {method:'POST'});
+    }
+    return;
+  }
+
+  if(action === 'shutdown'){
+    if(confirm('Shutdown the Raspberry Pi now?')){
+      await fetch('/api/system/shutdown', {method:'POST'});
+    }
+  }
 }
 
 refreshAll();
@@ -492,6 +520,18 @@ class Handler(SimpleHTTPRequestHandler):
                     return self._json({"ok": True, "output": text or "Library update complete."})
 
                 return self._json({"ok": False, "error": err or text or "Library update failed."}, 500)
+
+            if u.path == "/api/system/restart-icecast":
+                r = run(["sudo", "systemctl", "restart", "icecast2.service"])
+                return self._json({"ok": r.returncode == 0})
+
+            if u.path == "/api/system/reboot":
+                run(["sudo", "reboot"])
+                return self._json({"ok": True})
+
+            if u.path == "/api/system/shutdown":
+                run(["sudo", "shutdown", "-h", "now"])
+                return self._json({"ok": True})
 
             if u.path.startswith("/api/output/"):
                 parts = u.path.strip("/").split("/")
