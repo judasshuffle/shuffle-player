@@ -15,6 +15,9 @@ RESYNC_SCRIPT = "/home/dan/shuffle-player/scripts/resync_jukebox_db.sh"
 
 SERVICES = {
     "icecast": "icecast2.service",
+    "mp3_stream": "shuffle-radio.service",
+    "snapserver": "snapserver.service",
+    "snapfifo_feed": "shuffle-snapfifo-feed.service",
 }
 
 GROUPS = {
@@ -27,8 +30,68 @@ def run(cmd):
 
 
 def is_active(service):
-    r = run(["systemctl", "is-active", service])
+    r = run(["sudo", "systemctl", "is-active", service])
     return (r.returncode == 0) and (r.stdout.strip() == "active")
+
+
+def get_output_status():
+    mp3_on = is_active("shuffle-radio.service")
+    snapserver_on = is_active("snapserver.service")
+    snapfifo_feed_on = is_active("shuffle-snapfifo-feed.service")
+
+    if snapserver_on and snapfifo_feed_on:
+        snapcast_state = "running"
+    elif snapserver_on or snapfifo_feed_on:
+        snapcast_state = "partial"
+    else:
+        snapcast_state = "stopped"
+
+    return {
+        "mp3_stream": mp3_on,
+        "snapserver": snapserver_on,
+        "snapfifo_feed": snapfifo_feed_on,
+        "snapcast_state": snapcast_state,
+    }
+
+
+def control_output(output_name, action):
+    if action not in ("start", "stop", "restart"):
+        return {"ok": False, "error": f"bad action: {action}"}
+
+    if output_name == "mp3_stream":
+        svc = "shuffle-radio.service"
+        r = run(["sudo", "systemctl", action, svc])
+        return {
+            "ok": r.returncode == 0,
+            "output": output_name,
+            "status": get_output_status(),
+        }
+
+    if output_name == "snapcast_hd":
+        results = []
+
+        if action == "start":
+            results.append(run(["sudo", "systemctl", "restart", "snapserver.service"]))
+            results.append(run(["sudo", "systemctl", "reset-failed", "shuffle-snapfifo-feed.service"]))
+            results.append(run(["sudo", "systemctl", "restart", "shuffle-snapfifo-feed.service"]))
+
+        elif action == "stop":
+            results.append(run(["sudo", "systemctl", "stop", "shuffle-snapfifo-feed.service"]))
+            results.append(run(["sudo", "systemctl", "stop", "snapserver.service"]))
+
+        elif action == "restart":
+            results.append(run(["sudo", "systemctl", "restart", "snapserver.service"]))
+            results.append(run(["sudo", "systemctl", "reset-failed", "shuffle-snapfifo-feed.service"]))
+            results.append(run(["sudo", "systemctl", "restart", "shuffle-snapfifo-feed.service"]))
+
+        ok = all(r.returncode == 0 for r in results)
+        return {
+            "ok": ok,
+            "output": output_name,
+            "status": get_output_status(),
+        }
+
+    return {"ok": False, "error": f"bad output: {output_name}"}
 
 
 def mpv_command(command):
@@ -105,27 +168,18 @@ body{
   font-family:system-ui;
   margin:40px;
 }
-
-h1{
-  margin-bottom:30px;
-}
-
+h1{ margin-bottom:30px; }
 .grid{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
   gap:20px;
 }
-
 .card{
   background:#1b1f2a;
   padding:20px;
   border-radius:12px;
 }
-
-.card-wide{
-  grid-column:1 / -1;
-}
-
+.card-wide{ grid-column:1 / -1; }
 button{
   background:#2b3142;
   border:none;
@@ -135,45 +189,20 @@ button{
   margin:4px;
   cursor:pointer;
 }
-
-button:hover{
-  background:#3a4156;
+button:hover{ background:#3a4156; }
+.ok{ color:#00ff99; font-weight:bold; }
+.bad{ color:#ff4d4d; font-weight:bold; }
+.warn{ color:#ffd166; font-weight:bold; }
+.muted{ opacity:.8; }
+.link{ color:#4db6ff; text-decoration:none; }
+.link:hover{ text-decoration:underline; }
+.value{ margin-top:8px; font-size:1.05rem; }
+.small{ font-size:.92rem; opacity:.85; margin-top:6px; }
+.output-block{
+  margin-top:14px;
+  padding-top:10px;
+  border-top:1px solid rgba(255,255,255,.08);
 }
-
-.ok{
-  color:#00ff99;
-  font-weight:bold;
-}
-
-.bad{
-  color:#ff4d4d;
-  font-weight:bold;
-}
-
-.muted{
-  opacity:.8;
-}
-
-.link{
-  color:#4db6ff;
-  text-decoration:none;
-}
-
-.link:hover{
-  text-decoration:underline;
-}
-
-.value{
-  margin-top:8px;
-  font-size:1.05rem;
-}
-
-.small{
-  font-size:.92rem;
-  opacity:.85;
-  margin-top:6px;
-}
-
 #libraryResult{
   margin-top:12px;
   white-space:pre-wrap;
@@ -185,7 +214,6 @@ button:hover{
 </head>
 
 <body>
-
 <h1>Shuffle Control</h1>
 
 <div class="grid">
@@ -233,9 +261,30 @@ button:hover{
   </div>
 
   <div class="card">
-    <h3>Stream Mode</h3>
-    <button>Public MP3</button>
-    <button>HD Lossless</button>
+    <h3>Outputs</h3>
+
+    <div class="output-block">
+      <div><strong>Snapserver HD</strong></div>
+      <button onclick="outputCtl('start','snapcast_hd')">Start</button>
+      <button onclick="outputCtl('stop','snapcast_hd')">Stop</button>
+      <button onclick="outputCtl('restart','snapcast_hd')">Restart</button>
+      <div id="snapcastStatus" class="value">Checking…</div>
+      <div id="snapcastDetail" class="small"></div>
+      <div class="small" style="margin-top:8px;">
+        <a class="link" href="https://github.com/judasshuffle/shuffle-player" target="_blank">
+          Download Windows HD Player
+        </a>
+      </div>
+    </div>
+
+    <div class="output-block">
+      <div><strong>MP3 Stream</strong></div>
+      <button onclick="outputCtl('start','mp3_stream')">Start</button>
+      <button onclick="outputCtl('stop','mp3_stream')">Stop</button>
+      <button onclick="outputCtl('restart','mp3_stream')">Restart</button>
+      <div id="mp3Status" class="value">Checking…</div>
+      <div id="mp3Detail" class="small"></div>
+    </div>
   </div>
 
   <div class="card">
@@ -252,7 +301,6 @@ button:hover{
 </div>
 
 <script>
-
 async function refreshStatus(){
   const r = await fetch('/api/status');
   const j = await r.json();
@@ -288,10 +336,45 @@ async function refreshLibraryStats(){
     (j.track_count === null || j.track_count === undefined) ? '—' : j.track_count;
 }
 
+async function refreshOutputs(){
+  const r = await fetch('/api/outputs');
+  const j = await r.json();
+
+  const mp3Status = document.getElementById('mp3Status');
+  const mp3Detail = document.getElementById('mp3Detail');
+  const snapStatus = document.getElementById('snapcastStatus');
+  const snapDetail = document.getElementById('snapcastDetail');
+
+  if(j.mp3_stream){
+    mp3Status.textContent = 'RUNNING';
+    mp3Status.className = 'value ok';
+    mp3Detail.textContent = 'shuffle-radio.service running';
+  } else {
+    mp3Status.textContent = 'STOPPED';
+    mp3Status.className = 'value bad';
+    mp3Detail.textContent = 'shuffle-radio.service stopped';
+  }
+
+  if(j.snapcast_state === 'running'){
+    snapStatus.textContent = 'RUNNING';
+    snapStatus.className = 'value ok';
+    snapDetail.textContent = 'snapserver + fifo feed running';
+  } else if(j.snapcast_state === 'partial'){
+    snapStatus.textContent = 'PARTIAL';
+    snapStatus.className = 'value warn';
+    snapDetail.textContent = 'snapserver and fifo feed are not both running';
+  } else {
+    snapStatus.textContent = 'STOPPED';
+    snapStatus.className = 'value bad';
+    snapDetail.textContent = 'snapserver + fifo feed stopped';
+  }
+}
+
 async function refreshAll(){
   await refreshStatus();
   await refreshNowPlaying();
   await refreshLibraryStats();
+  await refreshOutputs();
 }
 
 async function act(action,key){
@@ -302,6 +385,18 @@ async function act(action,key){
 async function grp(action,group){
   await fetch('/api/group/'+action+'/'+group);
   refreshStatus();
+}
+
+async function outputCtl(action, output){
+  const r = await fetch('/api/output/' + action + '/' + output, {method:'POST'});
+  const j = await r.json();
+
+  if(!j.ok){
+    alert('Output control failed: ' + (j.error || 'Unknown error'));
+  }
+
+  await refreshOutputs();
+  await refreshStatus();
 }
 
 async function shuffleAll(){
@@ -329,7 +424,6 @@ async function updateLibrary(){
 
 refreshAll();
 setInterval(refreshAll, 3000);
-
 </script>
 </body>
 </html>
@@ -379,6 +473,15 @@ class Handler(SimpleHTTPRequestHandler):
 
                 return self._json({"ok": False, "error": err or text or "Library update failed."}, 500)
 
+            if u.path.startswith("/api/output/"):
+                parts = u.path.strip("/").split("/")
+                if len(parts) != 4:
+                    return self._json({"ok": False, "error": "bad output path"}, 400)
+
+                _, _, action, output_name = parts
+                result = control_output(output_name, action)
+                return self._json(result, 200 if result.get("ok") else 500)
+
         except Exception as e:
             return self._json({"ok": False, "error": str(e)}, 500)
 
@@ -391,13 +494,16 @@ class Handler(SimpleHTTPRequestHandler):
             status = {k: is_active(v) for k, v in SERVICES.items()}
             return self._json(status)
 
+        if u.path == "/api/outputs":
+            return self._json(get_output_status())
+
         if u.path == "/api/nowplaying":
             return self._json(read_nowplaying())
 
         if u.path == "/api/library/stats":
             return self._json(get_library_stats())
 
-        if u.path.startswith("/api/") and not u.path.startswith("/api/group/"):
+        if u.path.startswith("/api/") and not u.path.startswith("/api/group/") and not u.path.startswith("/api/output/"):
             parts = u.path.strip("/").split("/")
 
             if len(parts) != 3:
