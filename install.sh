@@ -9,6 +9,7 @@ echo "======================================"
 echo ""
 
 INSTALL_DIR="$HOME/shuffle-player"
+VENV_DIR="$INSTALL_DIR/.venv"
 
 echo "Updating system..."
 sudo apt update
@@ -38,15 +39,29 @@ echo ""
 echo "Installing Python requirements..."
 
 if [ -f requirements.txt ]; then
-    pip3 install -r requirements.txt
+    echo "Creating virtual environment..."
+    python3 -m venv "$VENV_DIR"
+
+    echo "Activating virtual environment..."
+    . "$VENV_DIR/bin/activate"
+
+    echo "Upgrading pip..."
+    pip install --upgrade pip
+
+    echo "Installing requirements..."
+    pip install -r requirements.txt
+else
+    echo "No requirements.txt found — skipping Python package install."
 fi
 
 echo ""
 echo "Installing services..."
 
-if [ -d services ]; then
-    sudo cp services/*.service /etc/systemd/system/ || true
+if [ -d systemd ]; then
+    sudo cp systemd/*.service /etc/systemd/system/ 2>/dev/null || true
     sudo systemctl daemon-reload
+else
+    echo "No systemd directory found — skipping service install."
 fi
 
 echo ""
