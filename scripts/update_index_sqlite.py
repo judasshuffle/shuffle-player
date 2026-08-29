@@ -48,7 +48,6 @@ def ensure_schema(con: sqlite3.Connection):
       value TEXT NOT NULL
     );
     """)
-    # Existing DBs: add genre column if missing (CREATE TABLE IF NOT EXISTS won't alter existing table)
     try:
         con.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
     except sqlite3.OperationalError as e:
@@ -118,33 +117,25 @@ def read_tags(path: str):
         channels = int(ch) if ch else None
 
     return {
-        "artist": artist,
-        "album": album,
-        "title": title,
-        "tracknumber": tracknumber,
-        "year": year_i,
-        "genre": genre,
-        "duration": duration,
-        "bitrate": bitrate,
-        "samplerate": samplerate,
-        "channels": channels,
+        "artist": artist, "album": album, "title": title,
+        "tracknumber": tracknumber, "year": year_i, "genre": genre,
+        "duration": duration, "bitrate": bitrate,
+        "samplerate": samplerate, "channels": channels,
     }
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true",
                     help="Re-read tags for every file and update rows even if mtime/size match")
+    ap.add_argument("--prune", action="store_true",
+                    help="Remove database rows for audio files that no longer exist")
     args = ap.parse_args()
-    force = args.force
 
     con = connect()
     ensure_schema(con)
-
     now = int(time.time())
+    scanned = inserted = changed = skipped = removed = 0
 
-    scanned = inserted = changed = skipped = 0
-
-    # speed: fetch existing mtime/size into a dict once (17k rows is fine)
     existing = {}
     for path, mtime, size in con.execute("SELECT path, mtime, size FROM tracks"):
         existing[path] = (int(mtime), int(size))
@@ -154,7 +145,6 @@ def main():
         return int(row[0]) if row else now
 
     for root, dirs, files in os.walk(MUSIC_ROOT):
-        # prune Playlists from traversal
         dirs[:] = [d for d in dirs if d != "Playlists"]
         if is_playlists_path(root):
             continue
@@ -174,19 +164,19 @@ def main():
                 continue
 
             mtime = int(st.st_mtime)
-            size  = int(st.st_size)
-
+            size = int(st.st_size)
             scanned += 1
 
             prev = existing.get(path)
-            if not force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
+            if not args.force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
                 skipped += 1
                 continue
 
             meta = read_tags(path)
             if meta is None:
                 meta = {"artist": None, "album": None, "title": None, "tracknumber": None,
-                        "year": None, "genre": None, "duration": None, "bitrate": None, "samplerate": None, "channels": None}
+                        "year": None, "genre": None, "duration": None, "bitrate": None,
+                        "samplerate": None, "channels": None}
 
             existed = prev is not None
             added_at = get_added_at(path) if existed else now
@@ -196,31 +186,20 @@ def main():
                                  mtime,size,ext,added_at,updated_at)
               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
               ON CONFLICT(path) DO UPDATE SET
-                artist=excluded.artist,
-                album=excluded.album,
-                title=excluded.title,
-                tracknumber=excluded.tracknumber,
-                year=excluded.year,
-                genre=excluded.genre,
-                duration=excluded.duration,
-                bitrate=excluded.bitrate,
-                samplerate=excluded.samplerate,
-                channels=excluded.channels,
-                mtime=excluded.mtime,
-                size=excluded.size,
-                ext=excluded.ext,
+                artist=excluded.artist, album=excluded.album, title=excluded.title,
+                tracknumber=excluded.tracknumber, year=excluded.year, genre=excluded.genre,
+                duration=excluded.duration, bitrate=excluded.bitrate,
+                samplerate=excluded.samplerate, channels=excluded.channels,
+                mtime=excluded.mtime, size=excluded.size, ext=excluded.ext,
                 updated_at=excluded.updated_at
             """, (
-                path,
-                meta["artist"], meta["album"], meta["title"], meta["tracknumber"], meta["year"], meta["genre"],
+                path, meta["artist"], meta["album"], meta["title"],
+                meta["tracknumber"], meta["year"], meta["genre"],
                 meta["duration"], meta["bitrate"], meta["samplerate"], meta["channels"],
-                mtime, size, ext,
-                added_at,
-                now
+                mtime, size, ext, added_at, now
             ))
 
             existing[path] = (mtime, size)
-
             if existed:
                 changed += 1
             else:
@@ -229,11 +208,24 @@ def main():
             if (inserted + changed) % 250 == 0:
                 con.commit()
 
+    if args.prune:
+        missing = [path for path in existing if not os.path.exists(path)]
+        if missing:
+            con.executemany("DELETE FROM tracks WHERE path=?", [(path,) for path in missing])
+            removed = len(missing)
+
     con.execute("INSERT OR REPLACE INTO scan_state(key,value) VALUES(?,?)", ("last_scan_at", str(now)))
     con.commit()
+    total = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
     con.close()
 
-    print(f"Scanned: {scanned} | Inserted: {inserted} | Changed: {changed} | Skipped: {skipped}")
+    print("Library scan complete")
+    print(f"Scanned files: {scanned}")
+    print(f"Added tracks: {inserted}")
+    print(f"Updated tracks: {changed}")
+    print(f"Removed missing tracks: {removed}")
+    print(f"Unchanged tracks: {skipped}")
+    print(f"Database total: {total}")
 
 if __name__ == "__main__":
     main()
