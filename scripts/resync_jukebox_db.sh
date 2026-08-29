@@ -37,7 +37,14 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 BACKUP="$BACKUP_DIR/jukebox.db.$(date +%Y%m%d_%H%M%S).backup"
-cp --preserve=mode,timestamps "$DB" "$BACKUP"
+"$PYTHON" - "$DB" "$BACKUP" <<'PY'
+import sqlite3
+import sys
+
+source_path, backup_path = sys.argv[1:3]
+with sqlite3.connect(source_path) as source, sqlite3.connect(backup_path) as backup:
+    source.backup(backup)
+PY
 
 echo "Library scan started"
 echo "Database backup: $BACKUP"
