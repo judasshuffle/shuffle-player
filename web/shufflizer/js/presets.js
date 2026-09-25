@@ -63,7 +63,7 @@ phosphor: false,
 
 VLM: [
 {
-name: "Tempest 2000 Warp Rings",
+name: "Tempest 2000 Bonus Flight",
 effectId: "warpBonusRings",
 params: {
 spin: 1.2,

@@ -359,7 +359,8 @@ export function startEngine(canvas, analyser, uiState) {
     // Overlay: now playing (disabled; title uses particles)
 
     // Global overlays
-    drawOverlays(ctx, w, h, t, audio, uiState);
+    // The bonus flight has its own perspective; the global scope rings obscure it.
+    if (uiState.effectId !== "warpBonusRings") drawOverlays(ctx, w, h, t, audio, uiState);
   }
 
   requestAnimationFrame((t) => {
