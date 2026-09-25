@@ -2,6 +2,42 @@
 // Kept separate from the original tunnel and pyramid effects.
 const TAU = Math.PI * 2;
 
+function makeLavaTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const g = canvas.getContext("2d");
+  const base = g.createLinearGradient(0, 0, 0, canvas.height);
+  base.addColorStop(0, "#43151d");
+  base.addColorStop(0.45, "#a33826");
+  base.addColorStop(0.78, "#d67731");
+  base.addColorStop(1, "#54212a");
+  g.fillStyle = base;
+  g.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Deterministic streaks give the reusable texture a mottled, flowing surface.
+  let seed = 1729;
+  const random = () => {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const colors = ["rgba(255,216,129,.55)", "rgba(255,155,58,.42)",
+    "rgba(68,16,28,.46)", "rgba(120,26,35,.52)"];
+  for (let i = 0; i < 180; i++) {
+    const x = random() * canvas.width;
+    const y = random() * canvas.height;
+    const length = 35 + random() * 240;
+    g.strokeStyle = colors[i % colors.length];
+    g.lineWidth = 0.7 + random() * 3.5;
+    g.beginPath();
+    g.moveTo(x, y);
+    g.bezierCurveTo(x + length * 0.28, y - 15 + random() * 30,
+      x + length * 0.75, y + 14 - random() * 28, x + length, y);
+    g.stroke();
+  }
+  return canvas;
+}
+
 function shard(ctx, x, y, size, angle, opacity) {
   ctx.save();
   ctx.translate(x, y);
@@ -52,36 +88,23 @@ export const effect = {
     ctx.fillStyle = "#020208";
     ctx.fillRect(0, 0, w, h);
 
-    // Molten bands skim the top of the scene like a planetary horizon.
-    const sky = ctx.createLinearGradient(0, 0, 0, h * 0.34);
-    sky.addColorStop(0, "#4b1617");
-    sky.addColorStop(0.18, "#a73720");
-    sky.addColorStop(0.48, "#de6324");
-    sky.addColorStop(0.72, "#5e231f");
-    sky.addColorStop(1, "rgba(2,2,8,0)");
-    ctx.fillStyle = sky;
-    ctx.beginPath();
-    ctx.moveTo(0, 0);
-    ctx.lineTo(w, 0);
-    ctx.lineTo(w, h * 0.09);
-    ctx.bezierCurveTo(w * 0.82, h * 0.42, w * 0.66, h * 0.15, cx, h * 0.20);
-    ctx.bezierCurveTo(w * 0.28, h * 0.12, w * 0.18, h * 0.42, 0, h * 0.12);
-    ctx.closePath();
-    ctx.fill();
-
-    for (let i = 0; i < 22; i++) {
-      const band = i / 22;
-      const sway = Math.sin(i * 1.7 + time * 3) * h * 0.025;
-      const y = h * (0.025 + band * 0.23) + sway;
-      ctx.strokeStyle = i % 3 === 0
-        ? `rgba(255,215,125,${0.16 + energy * 0.16})`
-        : `rgba(103,25,33,${0.30 + band * 0.20})`;
-      ctx.lineWidth = 2 + (i % 4) * 2;
-      ctx.beginPath();
-      ctx.moveTo(-w * 0.05, y + h * 0.06);
-      ctx.bezierCurveTo(w * 0.24, y - h * 0.18, w * 0.33, y + h * 0.07, cx, y - h * 0.035);
-      ctx.bezierCurveTo(w * 0.7, y + h * 0.04, w * 0.8, y - h * 0.14, w * 1.05, y + h * 0.04);
-      ctx.stroke();
+    // Move one small texture over a narrowing, bending ceiling in perspective.
+    // The texture is generated once, then reused; no per-frame pixel processing.
+    if (!state.lavaTexture) state.lavaTexture = makeLavaTexture();
+    const texture = state.lavaTexture;
+    const bands = 40;
+    for (let i = 0; i < bands; i++) {
+      const z = i / bands;
+      const next = (i + 1) / bands;
+      const y = h * (0.34 * Math.pow(z, 1.15));
+      const yNext = h * (0.34 * Math.pow(next, 1.15));
+      const ripple = 1 + Math.sin(time * 3.2 + z * 12) * 0.09 * (0.25 + z);
+      const width = w * (1 - 0.91 * Math.pow(z, 1.4)) * ripple;
+      const bend = Math.sin(time * 1.1 + z * 3.1) * w * 0.08 * z;
+      const x = cx + bend - width / 2;
+      const sourceY = Math.floor((time * 58 + z * 205) % (texture.height - 5));
+      ctx.drawImage(texture, 0, sourceY, texture.width, 5,
+        x, y, width, yNext - y + 1.2);
     }
 
     // Thin lava currents bend past the flight corridor without filling the void.
