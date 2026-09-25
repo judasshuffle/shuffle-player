@@ -63,6 +63,20 @@ phosphor: false,
 
 VLM: [
 {
+name: "Tempest 2000 Warp Rings",
+effectId: "warpBonusRings",
+params: {
+spin: 1.2,
+trail: 0.18,
+zap: 1.0,
+spawn: 0,
+shockwave: 0,
+beatThresh: 1.22,
+glow: true,
+phosphor: true,
+},
+},
+{
 name: "Minter 01 (Tunnel)",
 effectId: "tempestTunnel",
 params: {
