@@ -77,9 +77,17 @@ export const effect = {
   init() {},
   update() {},
   render({ ctx, w, h, dt, audio, state }) {
-    const energy = Math.min(1, (audio.energy || 0) * 5);
-    state.travel = (state.travel || 0) + Math.min(dt || 0.016, 0.05) * (0.28 + energy * 0.19);
-    state.pulse = audio.beat ? 1 : (state.pulse || 0) * 0.90;
+    const freq = audio.freq || [];
+    let bassSum = 0;
+    const bassBins = Math.min(32, freq.length);
+    for (let i = 0; i < bassBins; i++) bassSum += freq[i];
+    const bass = bassBins ? bassSum / (bassBins * 255) : 0;
+    const input = Math.min(1, Math.max((audio.energy || 0) * 8, bass * 2.5));
+    state.level = Math.max(input, (state.level || 0) * 0.86);
+    state.pulse = audio.beat ? 1 : (state.pulse || 0) * 0.84;
+    const level = state.level;
+    state.travel = (state.travel || 0) + Math.min(dt || 0.016, 0.05) *
+      (0.24 + level * 0.55 + state.pulse * 0.28);
     const time = state.travel;
     const cx = w * (0.5 + Math.sin(time * 0.7) * 0.045);
     const cy = h * 0.48;
@@ -93,12 +101,15 @@ export const effect = {
     if (!state.lavaTexture) state.lavaTexture = makeLavaTexture();
     const texture = state.lavaTexture;
     const bands = 40;
+    ctx.save();
+    ctx.globalAlpha = 0.65 + level * 0.35;
     for (let i = 0; i < bands; i++) {
       const z = i / bands;
       const next = (i + 1) / bands;
       const y = h * (0.34 * Math.pow(z, 1.15));
       const yNext = h * (0.34 * Math.pow(next, 1.15));
-      const ripple = 1 + Math.sin(time * 3.2 + z * 12) * 0.09 * (0.25 + z);
+      const ripple = 1 + Math.sin(time * 3.2 + z * 12) *
+        (0.07 + level * 0.10) * (0.25 + z);
       const width = w * (1 - 0.91 * Math.pow(z, 1.4)) * ripple;
       const bend = Math.sin(time * 1.1 + z * 3.1) * w * 0.08 * z;
       const x = cx + bend - width / 2;
@@ -106,6 +117,7 @@ export const effect = {
       ctx.drawImage(texture, 0, sourceY, texture.width, 5,
         x, y, width, yNext - y + 1.2);
     }
+    ctx.restore();
 
     // Thin lava currents bend past the flight corridor without filling the void.
     for (let bank = -1; bank <= 1; bank += 2) {
@@ -113,7 +125,7 @@ export const effect = {
         const offset = (current + 1) / 8;
         const bend = Math.sin(time * 1.5 + current * 0.8) * w * 0.055;
         ctx.strokeStyle = current % 3 === 0
-          ? `rgba(255,166,78,${0.08 + energy * 0.07})`
+          ? `rgba(255,166,78,${0.08 + level * 0.15})`
           : "rgba(145,42,35,0.09)";
         ctx.lineWidth = 1 + current * 0.4;
         ctx.beginPath();
@@ -133,7 +145,7 @@ export const effect = {
       for (let dot = 0; dot < 24; dot++) {
         const depth = (dot / 24 + time * 0.63) % 1;
         const distance = depth * depth * Math.max(w, h) * 0.79;
-        const opacity = (0.06 + depth * 0.30) * (dy < 0 ? 0.55 : 1);
+        const opacity = (0.06 + depth * 0.30) * (dy < 0 ? 0.55 : 1) * (1 + level * 0.5);
         ctx.fillStyle = lane % 3 === 0
           ? `rgba(108,224,255,${opacity})`
           : lane % 3 === 1
@@ -150,7 +162,8 @@ export const effect = {
       const radius = Math.min(w, h) * (0.012 + depth * depth * 0.46);
       const gateX = cx + Math.sin(time * 0.75 + depth * 3.7) * w * 0.10 * depth;
       const gateY = cy + Math.cos(time * 0.6 + depth * 2) * h * 0.045 * depth;
-      const size = Math.min(w, h) * (0.004 + depth * 0.024) * (1 + state.pulse * 0.14);
+      const size = Math.min(w, h) * (0.004 + depth * 0.024) *
+        (1 + level * 0.42 + state.pulse * 0.45);
       for (let piece = 0; piece < 8; piece++) {
         const angle = piece / 8 * TAU - Math.PI / 2;
         shard(ctx, gateX + Math.cos(angle) * radius, gateY + Math.sin(angle) * radius * 0.77,
@@ -166,5 +179,16 @@ export const effect = {
     ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy - 3);
     ctx.moveTo(cx, cy + 3); ctx.lineTo(cx, cy + 10);
     ctx.stroke();
+
+    // A quiet meter makes it clear whether the visualizer is receiving audio.
+    const meterX = w - 94;
+    const meterY = h - 24;
+    ctx.font = "10px monospace";
+    ctx.fillStyle = level > 0.025 ? "rgba(124,255,174,.8)" : "rgba(180,180,190,.5)";
+    ctx.fillText("SIGNAL", meterX, meterY - 9);
+    for (let i = 0; i < 12; i++) {
+      ctx.fillStyle = i / 12 < level ? "#73f7b2" : "rgba(140,150,165,.22)";
+      ctx.fillRect(meterX + i * 7, meterY, 5, 10);
+    }
   },
 };
