@@ -231,6 +231,7 @@ startNowPlaying({
 
 // SHUFFLIZER_AUTOHIDE_UI
 (function setupAutoHideUI() {
+  if (document.documentElement.classList.contains("embedded")) return;
   const ui = document.getElementById("ui");
   if (!ui) return;
 
