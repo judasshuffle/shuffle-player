@@ -494,12 +494,14 @@ DASHBOARD_HTML = """
 
 <style>
 body{
-  background:#0f1117;
+  background:radial-gradient(circle at 85% -10%,#34304a 0,transparent 36%),#0f1117;
   color:#e6e6e6;
   font-family:system-ui;
-  margin:40px;
+  margin:0 auto;
+  padding:24px clamp(16px,4vw,48px) 48px;
+  max-width:1500px;
 }
-h1{ margin-bottom:30px; }
+h1{ margin:0 0 24px; letter-spacing:.04em; }
 .grid{
   display:grid;
   grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
@@ -509,8 +511,33 @@ h1{ margin-bottom:30px; }
   background:#1b1f2a;
   padding:20px;
   border-radius:12px;
+  border:1px solid rgba(255,255,255,.07);
 }
 .card-wide{ grid-column:1 / -1; }
+.visualizer-card{
+  background:linear-gradient(145deg,#222435,#191d28 50%,#161c27);
+  border-color:rgba(241,142,63,.28);
+  box-shadow:0 18px 50px rgba(0,0,0,.18);
+}
+.visualizer-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.visualizer-header h3{margin:0 0 12px}
+.visualizer-frame{
+  position:relative;
+  overflow:hidden;
+  border-radius:12px;
+  border:1px solid rgba(241,142,63,.38);
+  background:#070a0d;
+  box-shadow:inset 0 0 35px rgba(241,142,63,.12);
+}
+.visualizer-frame:after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,transparent 0 3px,rgba(0,0,0,.07) 4px);
+}
+.visualizer-frame iframe{
+  display:block;width:100%;height:clamp(320px,48vw,570px);border:0;
+}
+.visualizer-hint{margin:12px 0 0}
+@media(max-width:600px){.grid{grid-template-columns:minmax(0,1fr)}.card{padding:16px}}
 button{
   background:#2b3142;
   border:none;
@@ -617,6 +644,17 @@ button:hover{ background:#3a4156; }
 
 <div class="grid">
 
+  <div class="card card-wide visualizer-card">
+    <div class="visualizer-header">
+      <h3>Shufflizer · Live Visuals</h3>
+      <a class="link" href="/index.html" target="_blank" rel="noopener">Open full visualizer ↗</a>
+    </div>
+    <div class="visualizer-frame">
+      <iframe src="/index.html?embed=1" title="Shufflizer music visualizer" loading="lazy" allow="autoplay"></iframe>
+    </div>
+    <p class="small visualizer-hint">Press play in the visualizer to connect to the stream. It starts muted so your speakers don't play twice.</p>
+  </div>
+
   <div class="card card-wide">
     <h3>Now Playing</h3>
     <div class="nowplaying-wrap">
@@ -716,10 +754,6 @@ button:hover{ background:#3a4156; }
     <button onclick="systemCtl('restart_icecast')">Restart Icecast</button>
     <button onclick="systemCtl('reboot')">Reboot Pi</button>
     <button onclick="systemCtl('shutdown')">Shutdown Pi</button>
-  </div>
-
-  <div class="card">
-    <a class="link" href="/index.html" target="_blank">Open Shufflizer</a>
   </div>
 
 </div>

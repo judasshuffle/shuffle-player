@@ -100,3 +100,29 @@ body.ui-hidden #ui {
   animation: voiceIn 180ms ease-out, voiceFlicker 700ms ease-in-out infinite, voiceJitter 1200ms ease-in-out infinite;
 }
 
+/* The dashboard embeds this same visualizer; the standalone controls stay intact. */
+.embedded #ui {
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  min-width: 0;
+  max-width: 640px;
+  padding: 10px 14px;
+  border-color: rgba(241,142,63,.55);
+  border-radius: 10px;
+  background: rgba(10,13,19,.82);
+  backdrop-filter: blur(12px);
+  color: #ffe3bc;
+  box-shadow: 0 12px 32px rgba(0,0,0,.3);
+}
+.embedded #ui > :not(.row):not(audio):not(#paletteRow),
+.embedded #ui > .row:not(:nth-child(1)):not(:nth-child(2)) { display: none !important; }
+.embedded #ui .row { grid-template-columns: 68px minmax(0,1fr); }
+.embedded #ui select { width: 100%; min-width: 0; }
+.embedded #ui audio#audio { margin-top: 12px; height: 36px; }
+.embedded #paletteRow { font-size: 12px; }
+.embedded #paletteRow select { width: auto; max-width: min(220px,65vw); }
+.embedded body.ui-hidden #ui { opacity: 1; pointer-events: auto; transform: none; }
+@media (max-width: 480px) {
+  .embedded #ui { right: 10px; left: 10px; top: 10px; }
+}
