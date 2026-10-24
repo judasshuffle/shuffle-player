@@ -1,0 +1,6 @@
+.runtime/
+.capture/
+*.wav
+__pycache__/
+*.log
+test-results.json
