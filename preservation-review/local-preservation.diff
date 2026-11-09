@@ -1,0 +1,360 @@
+diff --git a/bin/wait_ptt.py b/bin/wait_ptt.py
+new file mode 100755
+index 0000000..be164e9
+--- /dev/null
++++ b/bin/wait_ptt.py
+@@ -0,0 +1,30 @@
++#!/usr/bin/env python3
++import sys, time
++from gpiozero import Button
++
++def main():
++    pin = int(sys.argv[1]) if len(sys.argv) > 1 else 17
++    b = Button(pin, pull_up=True, bounce_time=0.05)
++
++    # Ensure we start from "released" state (prevents instant triggers)
++    while b.is_pressed:
++        time.sleep(0.02)
++
++    # Wait for an actual press
++    b.wait_for_press()
++
++    # Require a deliberate press (debounce noise / phantom taps)
++    t0 = time.time()
++    while b.is_pressed and (time.time() - t0) < 0.15:
++        time.sleep(0.01)
++
++    # If it released too quickly, treat as noise and wait again
++    if not b.is_pressed:
++        return main()
++
++    # Now wait for release to end the PTT cycle
++    b.wait_for_release()
++    return 0
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/bin/wait_ptt.sh b/bin/wait_ptt.sh
+new file mode 100755
+index 0000000..9baa8d6
+--- /dev/null
++++ b/bin/wait_ptt.sh
+@@ -0,0 +1,12 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++PIN="${1:-17}"
++CHIP="${2:-gpiochip0}"
++
++# Strong debounce (button bounce was giving duplicate edges)
++DEBOUNCE="200ms"
++
++# Wait for a real press then a real release
++gpiomon -c "$CHIP" -b pull-up -p "$DEBOUNCE" -e falling -n 1 -q "$PIN" >/dev/null
++gpiomon -c "$CHIP" -b pull-up -p "$DEBOUNCE" -e rising  -n 1 -q "$PIN" >/dev/null
+diff --git a/scripts/resync_jukebox_db.sh b/scripts/resync_jukebox_db.sh
+index 219ead2..c58d273 100755
+--- a/scripts/resync_jukebox_db.sh
++++ b/scripts/resync_jukebox_db.sh
+@@ -1,106 +1,55 @@
+-#!/bin/bash
+-set -e
+-
+-DB="/home/dan/jukebox.db"
+-MUSIC_ROOT="/mnt/lossless"
+-
+-if [ ! -f "$DB" ]; then
+-  echo "Database not found: $DB"
++#!/usr/bin/env bash
++set -euo pipefail
++
++DB="${JUKEBOX_DB_PATH:-/home/dan/jukebox.db}"
++MUSIC_ROOT="${JUKEBOX_MUSIC_ROOT:-/mnt/lossless}"
++PROJECT_DIR="/home/dan/shuffle-player"
++INDEXER="$PROJECT_DIR/scripts/update_index_sqlite.py"
++BACKUP_DIR="/home/dan/jukebox-backups"
++LOCK_FILE="/tmp/shuffle-library-scan.lock"
++
++if [[ ! -f "$DB" ]]; then
++  echo "Library scan stopped: database not found: $DB" >&2
+   exit 1
+ fi
+ 
+-if [ ! -d "$MUSIC_ROOT" ]; then
+-  echo "Music root not found: $MUSIC_ROOT"
++if [[ ! -d "$MUSIC_ROOT" ]]; then
++  echo "Library scan stopped: music root not found: $MUSIC_ROOT" >&2
+   exit 1
+ fi
+ 
+-BACKUP="/home/dan/shuffle-player/jukebox.db.backup.$(date +%Y%m%d_%H%M%S)"
+-cp "$DB" "$BACKUP"
+-
+-python3 - <<'PY'
+-import os
+-import sqlite3
+-
+-db = "/home/dan/jukebox.db"
+-music_root = "/mnt/lossless"
+-
+-con = sqlite3.connect(db)
+-cur = con.cursor()
+-
+-rows = cur.execute("SELECT path FROM tracks").fetchall()
+-missing = [p for (p,) in rows if p and not os.path.exists(p)]
+-
+-removed = 0
+-if missing:
+-    cur.executemany("DELETE FROM tracks WHERE path = ?", [(p,) for p in missing])
+-    removed = len(missing)
+-
+-added = 0
+-updated = 0
+-
+-# Try to detect likely columns without assuming too much.
+-cols = [r[1] for r in cur.execute("PRAGMA table_info(tracks)").fetchall()]
+-has_path = "path" in cols
+-has_title = "title" in cols
+-has_artist = "artist" in cols
+-has_album = "album" in cols
+-
+-existing_paths = set()
+-if has_path:
+-    existing_paths = {p for (p,) in cur.execute("SELECT path FROM tracks").fetchall() if p}
+-
+-audio_exts = {".flac", ".mp3", ".m4a", ".ogg", ".opus", ".wav", ".aac", ".wma", ".aiff", ".alac"}
+-
+-def guess_tags_from_path(path):
+-    rel = os.path.relpath(path, music_root)
+-    parts = rel.split(os.sep)
+-    artist = parts[0] if len(parts) >= 2 else ""
+-    album = parts[1] if len(parts) >= 3 else ""
+-    title = os.path.splitext(os.path.basename(path))[0]
+-    return artist, album, title
+-
+-if has_path:
+-    for root, _, files in os.walk(music_root):
+-        for name in files:
+-            ext = os.path.splitext(name)[1].lower()
+-            if ext not in audio_exts:
+-                continue
+-
+-            full_path = os.path.join(root, name)
+-
+-            if full_path in existing_paths:
+-                continue
++if [[ ! -f "$INDEXER" ]]; then
++  echo "Library scan stopped: indexer not found: $INDEXER" >&2
++  exit 1
++fi
+ 
+-            artist, album, title = guess_tags_from_path(full_path)
++if [[ -x "$PROJECT_DIR/.venv/bin/python" ]]; then
++  PYTHON="$PROJECT_DIR/.venv/bin/python"
++else
++  PYTHON="/usr/bin/python3"
++fi
+ 
+-            insert_cols = []
+-            insert_vals = []
++exec 9>"$LOCK_FILE"
++if ! flock -n 9; then
++  echo "Library scan already running. Please wait for it to finish." >&2
++  exit 1
++fi
+ 
+-            if has_path:
+-                insert_cols.append("path")
+-                insert_vals.append(full_path)
+-            if has_title:
+-                insert_cols.append("title")
+-                insert_vals.append(title)
+-            if has_artist:
+-                insert_cols.append("artist")
+-                insert_vals.append(artist)
+-            if has_album:
+-                insert_cols.append("album")
+-                insert_vals.append(album)
++mkdir -p "$BACKUP_DIR"
++BACKUP="$BACKUP_DIR/jukebox.db.$(date +%Y%m%d_%H%M%S).backup"
++"$PYTHON" - "$DB" "$BACKUP" <<'PY'
++import sqlite3
++import sys
+ 
+-            if insert_cols:
+-                sql = f"INSERT INTO tracks ({', '.join(insert_cols)}) VALUES ({', '.join(['?']*len(insert_vals))})"
+-                cur.execute(sql, insert_vals)
+-                added += 1
++source_path, backup_path = sys.argv[1:3]
++with sqlite3.connect(source_path) as source, sqlite3.connect(backup_path) as backup:
++    source.backup(backup)
++PY
+ 
+-con.commit()
+-total = cur.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+-con.close()
++echo "Library scan started"
++echo "Database backup: $BACKUP"
++echo "Music root: $MUSIC_ROOT"
++echo
+ 
+-print(f"Backup created")
+-print(f"Added: {added}")
+-print(f"Updated: {updated}")
+-print(f"Removed missing: {removed}")
+-print(f"Final total: {total}")
+-PY
+\ No newline at end of file
++JUKEBOX_DB_PATH="$DB" JUKEBOX_MUSIC_ROOT="$MUSIC_ROOT" \
++  "$PYTHON" "$INDEXER" --prune
+diff --git a/scripts/update_index_sqlite.py b/scripts/update_index_sqlite.py
+index 29d31dd..c5f7fee 100755
+--- a/scripts/update_index_sqlite.py
++++ b/scripts/update_index_sqlite.py
+@@ -48,7 +48,6 @@ def ensure_schema(con: sqlite3.Connection):
+       value TEXT NOT NULL
+     );
+     """)
+-    # Existing DBs: add genre column if missing (CREATE TABLE IF NOT EXISTS won't alter existing table)
+     try:
+         con.execute("ALTER TABLE tracks ADD COLUMN genre TEXT")
+     except sqlite3.OperationalError as e:
+@@ -118,33 +117,25 @@ def read_tags(path: str):
+         channels = int(ch) if ch else None
+ 
+     return {
+-        "artist": artist,
+-        "album": album,
+-        "title": title,
+-        "tracknumber": tracknumber,
+-        "year": year_i,
+-        "genre": genre,
+-        "duration": duration,
+-        "bitrate": bitrate,
+-        "samplerate": samplerate,
+-        "channels": channels,
++        "artist": artist, "album": album, "title": title,
++        "tracknumber": tracknumber, "year": year_i, "genre": genre,
++        "duration": duration, "bitrate": bitrate,
++        "samplerate": samplerate, "channels": channels,
+     }
+ 
+ def main():
+     ap = argparse.ArgumentParser()
+     ap.add_argument("--force", action="store_true",
+                     help="Re-read tags for every file and update rows even if mtime/size match")
++    ap.add_argument("--prune", action="store_true",
++                    help="Remove database rows for audio files that no longer exist")
+     args = ap.parse_args()
+-    force = args.force
+ 
+     con = connect()
+     ensure_schema(con)
+-
+     now = int(time.time())
++    scanned = inserted = changed = skipped = removed = 0
+ 
+-    scanned = inserted = changed = skipped = 0
+-
+-    # speed: fetch existing mtime/size into a dict once (17k rows is fine)
+     existing = {}
+     for path, mtime, size in con.execute("SELECT path, mtime, size FROM tracks"):
+         existing[path] = (int(mtime), int(size))
+@@ -154,7 +145,6 @@ def main():
+         return int(row[0]) if row else now
+ 
+     for root, dirs, files in os.walk(MUSIC_ROOT):
+-        # prune Playlists from traversal
+         dirs[:] = [d for d in dirs if d != "Playlists"]
+         if is_playlists_path(root):
+             continue
+@@ -174,19 +164,19 @@ def main():
+                 continue
+ 
+             mtime = int(st.st_mtime)
+-            size  = int(st.st_size)
+-
++            size = int(st.st_size)
+             scanned += 1
+ 
+             prev = existing.get(path)
+-            if not force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
++            if not args.force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
+                 skipped += 1
+                 continue
+ 
+             meta = read_tags(path)
+             if meta is None:
+                 meta = {"artist": None, "album": None, "title": None, "tracknumber": None,
+-                        "year": None, "genre": None, "duration": None, "bitrate": None, "samplerate": None, "channels": None}
++                        "year": None, "genre": None, "duration": None, "bitrate": None,
++                        "samplerate": None, "channels": None}
+ 
+             existed = prev is not None
+             added_at = get_added_at(path) if existed else now
+@@ -196,31 +186,20 @@ def main():
+                                  mtime,size,ext,added_at,updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(path) DO UPDATE SET
+-                artist=excluded.artist,
+-                album=excluded.album,
+-                title=excluded.title,
+-                tracknumber=excluded.tracknumber,
+-                year=excluded.year,
+-                genre=excluded.genre,
+-                duration=excluded.duration,
+-                bitrate=excluded.bitrate,
+-                samplerate=excluded.samplerate,
+-                channels=excluded.channels,
+-                mtime=excluded.mtime,
+-                size=excluded.size,
+-                ext=excluded.ext,
++                artist=excluded.artist, album=excluded.album, title=excluded.title,
++                tracknumber=excluded.tracknumber, year=excluded.year, genre=excluded.genre,
++                duration=excluded.duration, bitrate=excluded.bitrate,
++                samplerate=excluded.samplerate, channels=excluded.channels,
++                mtime=excluded.mtime, size=excluded.size, ext=excluded.ext,
+                 updated_at=excluded.updated_at
+             """, (
+-                path,
+-                meta["artist"], meta["album"], meta["title"], meta["tracknumber"], meta["year"], meta["genre"],
++                path, meta["artist"], meta["album"], meta["title"],
++                meta["tracknumber"], meta["year"], meta["genre"],
+                 meta["duration"], meta["bitrate"], meta["samplerate"], meta["channels"],
+-                mtime, size, ext,
+-                added_at,
+-                now
++                mtime, size, ext, added_at, now
+             ))
+ 
+             existing[path] = (mtime, size)
+-
+             if existed:
+                 changed += 1
+             else:
+@@ -229,11 +208,24 @@ def main():
+             if (inserted + changed) % 250 == 0:
+                 con.commit()
+ 
++    if args.prune:
++        missing = [path for path in existing if not os.path.exists(path)]
++        if missing:
++            con.executemany("DELETE FROM tracks WHERE path=?", [(path,) for path in missing])
++            removed = len(missing)
++
+     con.execute("INSERT OR REPLACE INTO scan_state(key,value) VALUES(?,?)", ("last_scan_at", str(now)))
+     con.commit()
++    total = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
+     con.close()
+ 
+-    print(f"Scanned: {scanned} | Inserted: {inserted} | Changed: {changed} | Skipped: {skipped}")
++    print("Library scan complete")
++    print(f"Scanned files: {scanned}")
++    print(f"Added tracks: {inserted}")
++    print(f"Updated tracks: {changed}")
++    print(f"Removed missing tracks: {removed}")
++    print(f"Unchanged tracks: {skipped}")
++    print(f"Database total: {total}")
+ 
+ if __name__ == "__main__":
+     main()
