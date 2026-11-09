@@ -1,0 +1,350 @@
+diff --git a/synology/README.md b/synology/README.md
+index 9b311ac..4ae0bc1 100644
+--- a/synology/README.md
++++ b/synology/README.md
+@@ -4,8 +4,8 @@ This separate application searches an existing `tracks` table and plays its musi
+ in the PC browser. No Pi, MPV, systemd, NAS credentials, scanner, migration, or
+ schema setup is used. The original application and scanner commits remain intact.
+ 
+-The local demo image contains three newly generated 16-second WAV tracks and a
+-fourth missing-track entry. Its SQLite database is created once at image build,
++The local demo image contains nine newly generated 16-second WAV tracks and one
++missing-track entry. Its SQLite database is created once at image build,
+ closed, made read-only, and served from a read-only container filesystem. There
+ are no host mounts. The queue exists only in each browser tab's memory.
+ 
+@@ -22,6 +22,28 @@ queue, reorder playback by selecting a queue item, remove items, pause, seek, an
+ change volume using the native player. Queue completion advances automatically.
+ Missing entries stay visible but cannot be queued. No VU UI is added.
+ 
++**Shuffle All** reads all rows from the existing index in batches, omits unavailable
++files from the browser queue, shuffles the available tracks and starts playback.
++It never walks folders, updates metadata or changes the index. It replaces the
++current browser queue. Normal Play matches also replaces the queue; Queue matches
++appends without starting or interrupting playback.
++
++Type `play 70s Bob Dylan` or `queue 1970s Bob Dylan` in the search box. Both show
++artist matches for 1970–1979 and wait for Play matches / Queue matches. This is
++typed command interpretation, not voice recognition. Bare text still searches
++artist, album and title. Two-digit decades 00s–20s mean 2000–2029, and 30s–90s mean
++1930–1999; explicit four-digit decades remove ambiguity. Artist matching uses a
++case-insensitive substring with bound SQL values, not fuzzy artist recognition.
++
++The demo additionally contains synthetic tones labelled Bob Dylan (demo), with
++years 1969, 1970, 1979, 1980 and unknown. The 70s command returns exactly the 1970
++and 1979 entries and reports exclusion of the undated entry. `play 70s Undated
++Artist` demonstrates the missing-year error. These are generated tones, not
++Bob Dylan recordings. A database without a year column refuses decade queries;
++matching rows with null/invalid years are excluded and reported. No artist's
++tracks are substituted without the requested decade filter. Years must be usable
++four-digit values; no dates are inferred from filenames or by scanning music.
++
+ Media uses same-origin HTTP with byte-range and HEAD support. Shufflizer uses the
+ same browser audio element and analyser; it does not create another stream or
+ fetch the Pi. Each browser has independent playback. Direct browser-supported
+diff --git a/synology/app.js b/synology/app.js
+index 29127af..3f23244 100644
+--- a/synology/app.js
++++ b/synology/app.js
+@@ -14,6 +14,7 @@ frame.title = 'Shufflizer — reacts to browser playback';
+ frame.allow = 'autoplay';
+ el('visualizer').append(frame);
+ let queue = [], position = -1, offset = 0, query = '', generation = 0;
++let actionVersion = 0;
+ function button(label, action) { const b = document.createElement('button'); b.textContent = label; b.onclick = action; return b; }
+ function renderQueue() {
+   el('queue').replaceChildren();
+@@ -57,6 +58,8 @@ async function search(append = false) {
+     if (!response.ok) throw Error();
+     const result = await response.json();
+     if (mine !== generation) return;
++    el('interpretation').textContent = result.error || result.message || 'Review matches before playback.';
++    el('playMatches').disabled = el('queueMatches').disabled = !!result.error || !result.tracks.some(track => track.available);
+     if (!append) el('results').replaceChildren();
+     for (const track of result.tracks) {
+       const row = document.createElement('div'); row.className = 'track';
+@@ -73,6 +76,45 @@ async function search(append = false) {
+     el('more').hidden = !result.has_more;
+   } catch { if (mine === generation) el('results').textContent = 'Library unavailable. No scan or rebuild was started.'; }
+ }
+-el('search').onsubmit = event => { event.preventDefault(); query = el('q').value.trim(); offset = 0; search(); };
++async function collectMatches(shuffle = false) {
++  const mine = ++actionVersion, selectedQuery = query;
++  let collected = [], cursor = 0;
++  el('status').textContent = shuffle ? 'Reading tracks from the existing index; no music scan.' : 'Collecting the reviewed matches from the index.';
++  while (true) {
++    const url = shuffle ? '/api/shuffle?after=' + cursor : '/api/search?q=' + encodeURIComponent(selectedQuery) + '&offset=' + cursor;
++    const response = await fetch(url);
++    if (!response.ok) throw Error('Unable to read indexed tracks.');
++    const result = await response.json();
++    if (mine !== actionVersion) return null;
++    if (result.error) throw Error(result.error);
++    collected.push(...result.tracks.filter(track => track.available));
++    if (!result.has_more) break;
++    cursor = shuffle ? result.after : cursor + 50;
++  }
++  if (shuffle) {
++    for (let i = collected.length - 1; i > 0; i--) {
++      const j = Math.floor(Math.random() * (i + 1));
++      [collected[i], collected[j]] = [collected[j], collected[i]];
++    }
++  }
++  return collected;
++}
++async function useMatches(start, shuffle = false) {
++  try {
++    const matches = await collectMatches(shuffle);
++    if (!matches) return;
++    if (!matches.length) { el('status').textContent = 'No available indexed tracks match. Queue unchanged.'; return; }
++    if (start) {
++      queue = matches; position = -1; renderQueue(); await play(0);
++    } else {
++      queue.push(...matches); renderQueue();
++      el('status').textContent = `${matches.length} matching tracks added to the queue; playback unchanged.`;
++    }
++  } catch (error) { el('status').textContent = error.message + ' Queue unchanged.'; }
++}
++el('playMatches').onclick = () => useMatches(true);
++el('queueMatches').onclick = () => useMatches(false);
++el('shuffleAll').onclick = () => useMatches(true, true);
++el('search').onsubmit = event => { event.preventDefault(); actionVersion++; query = el('q').value.trim(); offset = 0; el('playMatches').disabled = el('queueMatches').disabled = true; search(); };
+ el('more').onclick = () => { offset += 50; search(true); };
+ search();
+diff --git a/synology/fixtures.py b/synology/fixtures.py
+index 5ddfc2f..345df65 100644
+--- a/synology/fixtures.py
++++ b/synology/fixtures.py
+@@ -23,6 +23,17 @@ def generate(music, database):
+         con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/" + path.name,
+                     "Preview Synth", "Synthetic Sessions", title, 16, 2026))
+     con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/Missing.wav", "Preview Synth", "Synthetic Sessions", "Missing Track", 16, 2026))
++    # Synthetic tones labelled for command/filter demonstrations, not recordings.
++    for title, artist, year in [("Demo 1969", "Bob Dylan (demo)", 1969),
++                                ("Demo 1970", "Bob Dylan (demo)", 1970),
++                                ("Demo 1979", "Bob Dylan (demo)", 1979),
++                                ("Demo 1980", "Bob Dylan (demo)", 1980),
++                                ("Demo unknown year", "Bob Dylan (demo)", None),
++                                ("Demo undated", "Undated Artist", None)]:
++        path = music / (title + ".wav")
++        path.write_bytes((music / "Copper Pulse.wav").read_bytes())
++        con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/" + path.name,
++                    artist, "Synthetic Decade Fixtures", title, 16, year))
+     con.commit()
+     con.close()
+     database.chmod(0o444)
+diff --git a/synology/index.html b/synology/index.html
+index a779da2..339a7b1 100644
+--- a/synology/index.html
++++ b/synology/index.html
+@@ -5,7 +5,9 @@
+ </style>
+ <h1>Shuffle</h1><p class="muted">Synology browser player · local synthetic demo</p>
+ <p>Read-only test index. Indexing disabled. Music and track information are generated fixtures.</p>
+-<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album or track" placeholder="Artist, album or track"><button>Search</button></form>
++<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album, track or typed command" placeholder="Artist, album, track, or play 70s Bob Dylan"><button>Search / interpret</button></form>
++<p class="small">Try <code>play 70s Bob Dylan</code>: artist matches from 1970–1979. Commands never start playback automatically. Two-digit decades 00s–20s mean 2000–2029; 30s–90s mean 1930–1999. Use four digits to avoid ambiguity.</p>
++<p id="interpretation" role="status"></p><div class="controls"><button id="playMatches" disabled>Play matches</button><button id="queueMatches" disabled>Queue matches</button><button id="shuffleAll">Shuffle All</button></div>
+ <div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
+ <section><h2>Now playing</h2><strong id="title">Choose a track</strong><p id="album" class="small"></p>
+ <div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>
+diff --git a/synology/server.py b/synology/server.py
+index 24a8d82..101e31f 100644
+--- a/synology/server.py
++++ b/synology/server.py
+@@ -12,6 +12,22 @@ from urllib.parse import parse_qs, urlparse
+ HERE = Path(__file__).resolve().parent
+ 
+ 
++def interpret(query):
++    text = query.strip()
++    command = re.match(r"^(play|queue)\s+", text, re.I)
++    if command:
++        text = text[command.end():].strip()
++    decade = re.match(r"^(\d{2}|\d{4})s(?:\s+|$)", text, re.I)
++    if decade:
++        year = int(decade[1])
++        if len(decade[1]) == 2:
++            year += 2000 if year < 30 else 1900
++        if year % 10 or not 1000 <= year <= 2090:
++            raise ValueError("Use a decade such as 70s or 1970s, not a single year.")
++        return text[decade.end():].strip(), year, True
++    return text, None, bool(command)
++
++
+ class Library:
+     def __init__(self, database, music):
+         self.database, self.music = Path(database).resolve(), Path(music).resolve()
+@@ -39,18 +55,49 @@ class Library:
+             raise ValueError("Track escapes the music mount")
+         return resolved
+ 
++    def describe(self, rows):
++        return [{**{k: r[k] for k in ("id", "artist", "album", "title")},
++                 "available": self.resolve(r["path"]).is_file()} for r in rows]
++
++    def shuffle_batch(self, after=0):
++        # Keyset pagination reads indexed rows only; it does not enumerate folders.
++        with self.connect() as con:
++            con.row_factory = sqlite3.Row
++            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks "
++                               "WHERE rowid>? ORDER BY rowid LIMIT 501", (after,)).fetchall()
++        return {"tracks": self.describe(rows[:500]), "has_more": len(rows) > 500,
++                "after": rows[499]["id"] if len(rows) >= 500 else after}
++
+     def search(self, query="", offset=0):
++        text, decade, artist_only = interpret(query)
+         # Escape LIKE metacharacters; values always use bound parameters.
+-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
++        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+         pattern = "%" + escaped + "%"
++        where = "artist LIKE ? ESCAPE '\\'" if artist_only else (
++            "(artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')")
++        values = [pattern] if artist_only else [pattern] * 3
++        info = {"artist": text if artist_only else None, "decade": decade,
++                "message": f"Artist contains ‘{text}’; years {decade}–{decade + 9}. Review matches before playback."
++                           if decade else "Review matches before playback."}
+         with self.connect() as con:
+             con.row_factory = sqlite3.Row
+-            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks WHERE "
+-                "artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' "
+-                "ORDER BY artist,album,title LIMIT 51 OFFSET ?", (pattern, pattern, pattern, offset)).fetchall()
+-        return {"tracks": [{**{k: r[k] for k in ("id", "artist", "album", "title")},
+-                            "available": self.resolve(r["path"]).is_file()} for r in rows[:50]],
+-                "has_more": len(rows) > 50}
++            if decade is not None:
++                columns = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
++                if "year" not in columns:
++                    return {"tracks": [], "has_more": False, "error": "Decade search unavailable: this index has no year column. No unfiltered tracks were substituted."}
++                valid = "(length(trim(CAST(year AS TEXT)))=4 AND trim(CAST(year AS TEXT)) NOT GLOB '*[^0-9]*' AND CAST(year AS INTEGER) BETWEEN 1000 AND 2099)"
++                missing = con.execute("SELECT COUNT(*) FROM tracks WHERE " + where + " AND (year IS NULL OR NOT " + valid + ")", values).fetchone()[0]
++                known = con.execute("SELECT COUNT(*) FROM tracks WHERE " + where + " AND " + valid, values).fetchone()[0]
++                if missing and not known:
++                    return {"tracks": [], "has_more": False, "error": "Decade search unavailable: matching artist tracks have no usable four-digit year data. No unfiltered tracks were substituted."}
++                info["unknown_years_excluded"] = missing
++                if missing:
++                    info["message"] += f" {missing} artist track(s) lack usable years and were excluded."
++                where += " AND " + valid + " AND CAST(year AS INTEGER) BETWEEN ? AND ?"
++                values += [decade, decade + 9]
++            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks WHERE " + where +
++                " ORDER BY artist,album,title LIMIT 51 OFFSET ?", (*values, offset)).fetchall()
++        return {"tracks": self.describe(rows[:50]), "has_more": len(rows) > 50, **info}
+ 
+     def track(self, ident):
+         with self.connect() as con:
+@@ -85,12 +132,17 @@ class Handler(SimpleHTTPRequestHandler):
+     def do_GET(self):
+         url = urlparse(self.path)
+         path = url.path
+-        if path == "/api/search":
++        if path in ("/api/search", "/api/shuffle"):
+             query = parse_qs(url.query)
+             try:
+                 offset = int(query.get("offset", ["0"])[0])
+                 if not 0 <= offset <= 1000000: raise ValueError()
+-                result = self.library.search(query.get("q", [""])[0][:200], offset)
++                if path == "/api/shuffle":
++                    after = int(query.get("after", ["0"])[0])
++                    if not 0 <= after < 2**63: raise ValueError()
++                    result = self.library.shuffle_batch(after)
++                else:
++                    result = self.library.search(query.get("q", [""])[0][:200], offset)
+             except (ValueError, sqlite3.Error, OSError):
+                 return self.send_error(400, "Search unavailable")
+             return self.content(json.dumps(result), "application/json")
+diff --git a/tests/test_synology_player.py b/tests/test_synology_player.py
+index e65772b..5e6cb70 100644
+--- a/tests/test_synology_player.py
++++ b/tests/test_synology_player.py
+@@ -68,12 +68,59 @@ class PlayerTests(unittest.TestCase):
+ 
+     def test_missing_track_retained_and_routes_disabled(self):
+         tracks = self.library.search()['tracks']
+-        self.assertEqual(len(tracks), 4)
++        self.assertEqual(len(tracks), 10)
+         missing = next(t for t in tracks if not t['available'])
+         self.assertEqual(self.request('/media/' + str(missing['id']))[0], 404)
+         for route in ('/api/library/resync', '/api/system/reboot'):
+             self.assertEqual(self.request(route, 'POST')[0], 405)
+-        self.assertEqual(len(self.library.search()['tracks']), 4)
++        self.assertEqual(len(self.library.search()['tracks']), 10)
++
++    def test_decade_artist_commands_and_unknown_years(self):
++        result = self.library.search('play 70s Bob Dylan')
++        self.assertEqual({t['title'] for t in result['tracks']}, {'Demo 1970', 'Demo 1979'})
++        self.assertEqual(result['decade'], 1970)
++        self.assertEqual(result['unknown_years_excluded'], 1)
++        self.assertEqual(self.library.search('queue 1970s Bob Dylan')['tracks'], result['tracks'])
++        self.assertIn('no usable', self.library.search('play 70s Undated Artist')['error'])
++        self.assertEqual(self.library.search('play 70s Nonexistent Artist')['tracks'], [])
++
++    def test_shuffle_reads_index_and_retains_unavailable(self):
++        result = self.library.shuffle_batch()
++        self.assertEqual(len(result['tracks']), 10)
++        self.assertEqual(sum(t['available'] for t in result['tracks']), 9)
++        self.assertFalse(result['has_more'])
++        self.assertEqual(self.request('/api/shuffle')[0], 200)
++
++    def test_missing_year_column_fails_without_schema_changes(self):
++        # A second, newly created temporary database deliberately lacks year data.
++        database = Path(self.temp.name) / 'no-years.db'
++        con = server.sqlite3.connect(database)
++        con.execute('CREATE TABLE tracks(path TEXT,artist TEXT,album TEXT,title TEXT)')
++        con.commit(); con.close()
++        try:
++            library = server.Library(database, self.music)
++            self.assertIn('no year column', library.search('play 70s Bob Dylan')['error'])
++            self.assertEqual(library.search('Bob Dylan')['tracks'], [])
++        finally:
++            database.unlink()
++
++    def test_shuffle_paginates_without_dropping_tracks(self):
++        database = Path(self.temp.name) / 'many.db'
++        con = server.sqlite3.connect(database)
++        con.execute('CREATE TABLE tracks(path TEXT,artist TEXT,album TEXT,title TEXT)')
++        con.executemany('INSERT INTO tracks VALUES(?,?,?,?)',
++            [('/mnt/lossless/Copper Pulse.wav', 'Demo', 'Many', str(i)) for i in range(550)])
++        con.commit(); con.close()
++        try:
++            library = server.Library(database, self.music)
++            first = library.shuffle_batch()
++            second = library.shuffle_batch(first['after'])
++            self.assertTrue(first['has_more'])
++            self.assertFalse(second['has_more'])
++            ids = [track['id'] for track in first['tracks'] + second['tracks']]
++            self.assertEqual(len(set(ids)), 550)
++        finally:
++            database.unlink()
+ 
+     def test_browser_audio_and_seek(self):
+         ident = self.library.search('Copper')['tracks'][0]['id']
+diff --git a/tests/test_synology_queue.cjs b/tests/test_synology_queue.cjs
+index 7f6f152..b867079 100644
+--- a/tests/test_synology_queue.cjs
++++ b/tests/test_synology_queue.cjs
+@@ -15,7 +15,7 @@ class Element {
+   pause() { this.paused = true; }
+   load() {}
+ }
+-const elements = Object.fromEntries(['player','title','album','status','visualizer','queue','prev','next','toggle','search','q','results','more'].map(id => [id,new Element()]));
++const elements = Object.fromEntries(['player','title','album','status','visualizer','queue','prev','next','toggle','search','q','results','more','interpretation','playMatches','queueMatches','shuffleAll'].map(id => [id,new Element()]));
+ const tracks = [{id:1,title:'Copper Pulse',artist:'Preview Synth',album:'Tests',available:true},
+                 {id:2,title:'Night Orbit',artist:'Preview Synth',album:'Tests',available:true},
+                 {id:3,title:'Missing',available:false}];
+@@ -49,5 +49,16 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
+   assert.equal(elements.player.paused,true);
+   assert.ok(window.playerAudio.analyser);
+   assert.equal(elements.visualizer.children[0].src,'/visualizer/index.html?embed=1');
+-  console.log('Queue UI tests passed: add, play, automatic next, previous, pause, unavailable track, shared analyser.');
++  elements.q.value = 'play 70s Bob Dylan';
++  elements.search.onsubmit({preventDefault() {}}); await flush();
++  assert.equal(elements.player.paused,true, 'Typed commands must not autoplay');
++  await elements.queueMatches.onclick();
++  assert.equal(elements.queue.children.length,4);
++  assert.equal(elements.player.paused,true, 'Queue matches must not change playback');
++  await elements.playMatches.onclick();
++  assert.equal(elements.queue.children.length,2);
++  assert.equal(elements.player.paused,false);
++  await elements.shuffleAll.onclick();
++  assert.equal(elements.queue.children.length,2, 'Shuffle excludes unavailable files');
++  console.log('Queue UI tests passed, including command review without autoplay, Play/Queue matches and Shuffle All.');
+ })().catch(error => { console.error(error);process.exitCode=1; });

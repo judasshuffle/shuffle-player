@@ -5,7 +5,9 @@
 </style>
 <h1>Shuffle</h1><p class="muted">Synology browser player · local synthetic demo</p>
 <p>Read-only test index. Indexing disabled. Music and track information are generated fixtures.</p>
-<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album or track" placeholder="Artist, album or track"><button>Search</button></form>
+<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album, track or typed command" placeholder="Artist, album, track, or play 70s Bob Dylan"><button>Search / interpret</button></form>
+<p class="small">Try <code>play 70s Bob Dylan</code>: artist matches from 1970–1979. Commands never start playback automatically. Two-digit decades 00s–20s mean 2000–2029; 30s–90s mean 1930–1999. Use four digits to avoid ambiguity.</p>
+<p id="interpretation" role="status"></p><div class="controls"><button id="playMatches" disabled>Play matches</button><button id="queueMatches" disabled>Queue matches</button><button id="shuffleAll">Shuffle All</button></div>
 <div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
 <section><h2>Now playing</h2><strong id="title">Choose a track</strong><p id="album" class="small"></p>
 <div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>

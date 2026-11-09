@@ -4,8 +4,8 @@ This separate application searches an existing `tracks` table and plays its musi
 in the PC browser. No Pi, MPV, systemd, NAS credentials, scanner, migration, or
 schema setup is used. The original application and scanner commits remain intact.
 
-The local demo image contains three newly generated 16-second WAV tracks and a
-fourth missing-track entry. Its SQLite database is created once at image build,
+The local demo image contains nine newly generated 16-second WAV tracks and one
+missing-track entry. Its SQLite database is created once at image build,
 closed, made read-only, and served from a read-only container filesystem. There
 are no host mounts. The queue exists only in each browser tab's memory.
 
@@ -21,6 +21,28 @@ to hear a pulsed test tone and feed the embedded Shufflizer. Add tracks to the
 queue, reorder playback by selecting a queue item, remove items, pause, seek, and
 change volume using the native player. Queue completion advances automatically.
 Missing entries stay visible but cannot be queued. No VU UI is added.
+
+**Shuffle All** reads all rows from the existing index in batches, omits unavailable
+files from the browser queue, shuffles the available tracks and starts playback.
+It never walks folders, updates metadata or changes the index. It replaces the
+current browser queue. Normal Play matches also replaces the queue; Queue matches
+appends without starting or interrupting playback.
+
+Type `play 70s Bob Dylan` or `queue 1970s Bob Dylan` in the search box. Both show
+artist matches for 1970–1979 and wait for Play matches / Queue matches. This is
+typed command interpretation, not voice recognition. Bare text still searches
+artist, album and title. Two-digit decades 00s–20s mean 2000–2029, and 30s–90s mean
+1930–1999; explicit four-digit decades remove ambiguity. Artist matching uses a
+case-insensitive substring with bound SQL values, not fuzzy artist recognition.
+
+The demo additionally contains synthetic tones labelled Bob Dylan (demo), with
+years 1969, 1970, 1979, 1980 and unknown. The 70s command returns exactly the 1970
+and 1979 entries and reports exclusion of the undated entry. `play 70s Undated
+Artist` demonstrates the missing-year error. These are generated tones, not
+Bob Dylan recordings. A database without a year column refuses decade queries;
+matching rows with null/invalid years are excluded and reported. No artist's
+tracks are substituted without the requested decade filter. Years must be usable
+four-digit values; no dates are inferred from filenames or by scanning music.
 
 Media uses same-origin HTTP with byte-range and HEAD support. Shufflizer uses the
 same browser audio element and analyser; it does not create another stream or

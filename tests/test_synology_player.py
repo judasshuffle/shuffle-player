@@ -68,12 +68,59 @@ class PlayerTests(unittest.TestCase):
 
     def test_missing_track_retained_and_routes_disabled(self):
         tracks = self.library.search()['tracks']
-        self.assertEqual(len(tracks), 4)
+        self.assertEqual(len(tracks), 10)
         missing = next(t for t in tracks if not t['available'])
         self.assertEqual(self.request('/media/' + str(missing['id']))[0], 404)
         for route in ('/api/library/resync', '/api/system/reboot'):
             self.assertEqual(self.request(route, 'POST')[0], 405)
-        self.assertEqual(len(self.library.search()['tracks']), 4)
+        self.assertEqual(len(self.library.search()['tracks']), 10)
+
+    def test_decade_artist_commands_and_unknown_years(self):
+        result = self.library.search('play 70s Bob Dylan')
+        self.assertEqual({t['title'] for t in result['tracks']}, {'Demo 1970', 'Demo 1979'})
+        self.assertEqual(result['decade'], 1970)
+        self.assertEqual(result['unknown_years_excluded'], 1)
+        self.assertEqual(self.library.search('queue 1970s Bob Dylan')['tracks'], result['tracks'])
+        self.assertIn('no usable', self.library.search('play 70s Undated Artist')['error'])
+        self.assertEqual(self.library.search('play 70s Nonexistent Artist')['tracks'], [])
+
+    def test_shuffle_reads_index_and_retains_unavailable(self):
+        result = self.library.shuffle_batch()
+        self.assertEqual(len(result['tracks']), 10)
+        self.assertEqual(sum(t['available'] for t in result['tracks']), 9)
+        self.assertFalse(result['has_more'])
+        self.assertEqual(self.request('/api/shuffle')[0], 200)
+
+    def test_missing_year_column_fails_without_schema_changes(self):
+        # A second, newly created temporary database deliberately lacks year data.
+        database = Path(self.temp.name) / 'no-years.db'
+        con = server.sqlite3.connect(database)
+        con.execute('CREATE TABLE tracks(path TEXT,artist TEXT,album TEXT,title TEXT)')
+        con.commit(); con.close()
+        try:
+            library = server.Library(database, self.music)
+            self.assertIn('no year column', library.search('play 70s Bob Dylan')['error'])
+            self.assertEqual(library.search('Bob Dylan')['tracks'], [])
+        finally:
+            database.unlink()
+
+    def test_shuffle_paginates_without_dropping_tracks(self):
+        database = Path(self.temp.name) / 'many.db'
+        con = server.sqlite3.connect(database)
+        con.execute('CREATE TABLE tracks(path TEXT,artist TEXT,album TEXT,title TEXT)')
+        con.executemany('INSERT INTO tracks VALUES(?,?,?,?)',
+            [('/mnt/lossless/Copper Pulse.wav', 'Demo', 'Many', str(i)) for i in range(550)])
+        con.commit(); con.close()
+        try:
+            library = server.Library(database, self.music)
+            first = library.shuffle_batch()
+            second = library.shuffle_batch(first['after'])
+            self.assertTrue(first['has_more'])
+            self.assertFalse(second['has_more'])
+            ids = [track['id'] for track in first['tracks'] + second['tracks']]
+            self.assertEqual(len(set(ids)), 550)
+        finally:
+            database.unlink()
 
     def test_browser_audio_and_seek(self):
         ident = self.library.search('Copper')['tracks'][0]['id']

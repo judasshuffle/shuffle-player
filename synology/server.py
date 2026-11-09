@@ -12,6 +12,22 @@ from urllib.parse import parse_qs, urlparse
 HERE = Path(__file__).resolve().parent
 
 
+def interpret(query):
+    text = query.strip()
+    command = re.match(r"^(play|queue)\s+", text, re.I)
+    if command:
+        text = text[command.end():].strip()
+    decade = re.match(r"^(\d{2}|\d{4})s(?:\s+|$)", text, re.I)
+    if decade:
+        year = int(decade[1])
+        if len(decade[1]) == 2:
+            year += 2000 if year < 30 else 1900
+        if year % 10 or not 1000 <= year <= 2090:
+            raise ValueError("Use a decade such as 70s or 1970s, not a single year.")
+        return text[decade.end():].strip(), year, True
+    return text, None, bool(command)
+
+
 class Library:
     def __init__(self, database, music):
         self.database, self.music = Path(database).resolve(), Path(music).resolve()
@@ -39,18 +55,49 @@ class Library:
             raise ValueError("Track escapes the music mount")
         return resolved
 
-    def search(self, query="", offset=0):
-        # Escape LIKE metacharacters; values always use bound parameters.
-        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        pattern = "%" + escaped + "%"
+    def describe(self, rows):
+        return [{**{k: r[k] for k in ("id", "artist", "album", "title")},
+                 "available": self.resolve(r["path"]).is_file()} for r in rows]
+
+    def shuffle_batch(self, after=0):
+        # Keyset pagination reads indexed rows only; it does not enumerate folders.
         with self.connect() as con:
             con.row_factory = sqlite3.Row
-            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks WHERE "
-                "artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' "
-                "ORDER BY artist,album,title LIMIT 51 OFFSET ?", (pattern, pattern, pattern, offset)).fetchall()
-        return {"tracks": [{**{k: r[k] for k in ("id", "artist", "album", "title")},
-                            "available": self.resolve(r["path"]).is_file()} for r in rows[:50]],
-                "has_more": len(rows) > 50}
+            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks "
+                               "WHERE rowid>? ORDER BY rowid LIMIT 501", (after,)).fetchall()
+        return {"tracks": self.describe(rows[:500]), "has_more": len(rows) > 500,
+                "after": rows[499]["id"] if len(rows) >= 500 else after}
+
+    def search(self, query="", offset=0):
+        text, decade, artist_only = interpret(query)
+        # Escape LIKE metacharacters; values always use bound parameters.
+        escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = "%" + escaped + "%"
+        where = "artist LIKE ? ESCAPE '\\'" if artist_only else (
+            "(artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\')")
+        values = [pattern] if artist_only else [pattern] * 3
+        info = {"artist": text if artist_only else None, "decade": decade,
+                "message": f"Artist contains ‘{text}’; years {decade}–{decade + 9}. Review matches before playback."
+                           if decade else "Review matches before playback."}
+        with self.connect() as con:
+            con.row_factory = sqlite3.Row
+            if decade is not None:
+                columns = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
+                if "year" not in columns:
+                    return {"tracks": [], "has_more": False, "error": "Decade search unavailable: this index has no year column. No unfiltered tracks were substituted."}
+                valid = "(length(trim(CAST(year AS TEXT)))=4 AND trim(CAST(year AS TEXT)) NOT GLOB '*[^0-9]*' AND CAST(year AS INTEGER) BETWEEN 1000 AND 2099)"
+                missing = con.execute("SELECT COUNT(*) FROM tracks WHERE " + where + " AND (year IS NULL OR NOT " + valid + ")", values).fetchone()[0]
+                known = con.execute("SELECT COUNT(*) FROM tracks WHERE " + where + " AND " + valid, values).fetchone()[0]
+                if missing and not known:
+                    return {"tracks": [], "has_more": False, "error": "Decade search unavailable: matching artist tracks have no usable four-digit year data. No unfiltered tracks were substituted."}
+                info["unknown_years_excluded"] = missing
+                if missing:
+                    info["message"] += f" {missing} artist track(s) lack usable years and were excluded."
+                where += " AND " + valid + " AND CAST(year AS INTEGER) BETWEEN ? AND ?"
+                values += [decade, decade + 9]
+            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks WHERE " + where +
+                " ORDER BY artist,album,title LIMIT 51 OFFSET ?", (*values, offset)).fetchall()
+        return {"tracks": self.describe(rows[:50]), "has_more": len(rows) > 50, **info}
 
     def track(self, ident):
         with self.connect() as con:
@@ -85,12 +132,17 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
-        if path == "/api/search":
+        if path in ("/api/search", "/api/shuffle"):
             query = parse_qs(url.query)
             try:
                 offset = int(query.get("offset", ["0"])[0])
                 if not 0 <= offset <= 1000000: raise ValueError()
-                result = self.library.search(query.get("q", [""])[0][:200], offset)
+                if path == "/api/shuffle":
+                    after = int(query.get("after", ["0"])[0])
+                    if not 0 <= after < 2**63: raise ValueError()
+                    result = self.library.shuffle_batch(after)
+                else:
+                    result = self.library.search(query.get("q", [""])[0][:200], offset)
             except (ValueError, sqlite3.Error, OSError):
                 return self.send_error(400, "Search unavailable")
             return self.content(json.dumps(result), "application/json")

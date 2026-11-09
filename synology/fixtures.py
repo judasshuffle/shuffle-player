@@ -23,6 +23,17 @@ def generate(music, database):
         con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/" + path.name,
                     "Preview Synth", "Synthetic Sessions", title, 16, 2026))
     con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/Missing.wav", "Preview Synth", "Synthetic Sessions", "Missing Track", 16, 2026))
+    # Synthetic tones labelled for command/filter demonstrations, not recordings.
+    for title, artist, year in [("Demo 1969", "Bob Dylan (demo)", 1969),
+                                ("Demo 1970", "Bob Dylan (demo)", 1970),
+                                ("Demo 1979", "Bob Dylan (demo)", 1979),
+                                ("Demo 1980", "Bob Dylan (demo)", 1980),
+                                ("Demo unknown year", "Bob Dylan (demo)", None),
+                                ("Demo undated", "Undated Artist", None)]:
+        path = music / (title + ".wav")
+        path.write_bytes((music / "Copper Pulse.wav").read_bytes())
+        con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/" + path.name,
+                    artist, "Synthetic Decade Fixtures", title, 16, year))
     con.commit()
     con.close()
     database.chmod(0o444)

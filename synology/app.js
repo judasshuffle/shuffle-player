@@ -14,6 +14,7 @@ frame.title = 'Shufflizer — reacts to browser playback';
 frame.allow = 'autoplay';
 el('visualizer').append(frame);
 let queue = [], position = -1, offset = 0, query = '', generation = 0;
+let actionVersion = 0;
 function button(label, action) { const b = document.createElement('button'); b.textContent = label; b.onclick = action; return b; }
 function renderQueue() {
   el('queue').replaceChildren();
@@ -57,6 +58,8 @@ async function search(append = false) {
     if (!response.ok) throw Error();
     const result = await response.json();
     if (mine !== generation) return;
+    el('interpretation').textContent = result.error || result.message || 'Review matches before playback.';
+    el('playMatches').disabled = el('queueMatches').disabled = !!result.error || !result.tracks.some(track => track.available);
     if (!append) el('results').replaceChildren();
     for (const track of result.tracks) {
       const row = document.createElement('div'); row.className = 'track';
@@ -73,6 +76,45 @@ async function search(append = false) {
     el('more').hidden = !result.has_more;
   } catch { if (mine === generation) el('results').textContent = 'Library unavailable. No scan or rebuild was started.'; }
 }
-el('search').onsubmit = event => { event.preventDefault(); query = el('q').value.trim(); offset = 0; search(); };
+async function collectMatches(shuffle = false) {
+  const mine = ++actionVersion, selectedQuery = query;
+  let collected = [], cursor = 0;
+  el('status').textContent = shuffle ? 'Reading tracks from the existing index; no music scan.' : 'Collecting the reviewed matches from the index.';
+  while (true) {
+    const url = shuffle ? '/api/shuffle?after=' + cursor : '/api/search?q=' + encodeURIComponent(selectedQuery) + '&offset=' + cursor;
+    const response = await fetch(url);
+    if (!response.ok) throw Error('Unable to read indexed tracks.');
+    const result = await response.json();
+    if (mine !== actionVersion) return null;
+    if (result.error) throw Error(result.error);
+    collected.push(...result.tracks.filter(track => track.available));
+    if (!result.has_more) break;
+    cursor = shuffle ? result.after : cursor + 50;
+  }
+  if (shuffle) {
+    for (let i = collected.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [collected[i], collected[j]] = [collected[j], collected[i]];
+    }
+  }
+  return collected;
+}
+async function useMatches(start, shuffle = false) {
+  try {
+    const matches = await collectMatches(shuffle);
+    if (!matches) return;
+    if (!matches.length) { el('status').textContent = 'No available indexed tracks match. Queue unchanged.'; return; }
+    if (start) {
+      queue = matches; position = -1; renderQueue(); await play(0);
+    } else {
+      queue.push(...matches); renderQueue();
+      el('status').textContent = `${matches.length} matching tracks added to the queue; playback unchanged.`;
+    }
+  } catch (error) { el('status').textContent = error.message + ' Queue unchanged.'; }
+}
+el('playMatches').onclick = () => useMatches(true);
+el('queueMatches').onclick = () => useMatches(false);
+el('shuffleAll').onclick = () => useMatches(true, true);
+el('search').onsubmit = event => { event.preventDefault(); actionVersion++; query = el('q').value.trim(); offset = 0; el('playMatches').disabled = el('queueMatches').disabled = true; search(); };
 el('more').onclick = () => { offset += 50; search(true); };
 search();
