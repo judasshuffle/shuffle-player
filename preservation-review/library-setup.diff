@@ -1,0 +1,535 @@
+diff --git a/.dockerignore b/.dockerignore
+index 740f4be..b924b1f 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -9,3 +9,5 @@
+ !web/shufflizer/js/**
+ !preview/
+ !preview/server.py
++!preview/library_setup.py
++!preview/setup.html
+diff --git a/preview/Dockerfile b/preview/Dockerfile
+index cf322f1..5549e10 100644
+--- a/preview/Dockerfile
++++ b/preview/Dockerfile
+@@ -5,6 +5,7 @@ COPY web/shufflizer/index.html /app/visualizer/index.html
+ COPY web/shufflizer/css /app/visualizer/css
+ COPY web/shufflizer/js /app/visualizer/js
+ COPY preview/server.py /app/preview.py
++COPY preview/library_setup.py preview/setup.html /app/
+ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+ USER 65534:65534
+ EXPOSE 8092
+diff --git a/preview/SETUP.md b/preview/SETUP.md
+new file mode 100644
+index 0000000..1f63df7
+--- /dev/null
++++ b/preview/SETUP.md
+@@ -0,0 +1,75 @@
++# Music-library setup demonstration
++
++Open `/setup` on the preview to step through local-folder or NAS instructions,
++existing-index or new-library selection, read-only validation, and explicit
++confirmation. This stage is a dialogue prototype: every database and WAV file is
++generated in an owned temporary directory. Confirmation never launches a scanner
++or creates a user index. The synthetic dashboard's controls remain mocked.
++
++Try these demonstrations:
++
++1. Compatible index + `/music`: three existing entries; one unchanged, one
++   changed, one missing retained, plus one new file. Database remains unchanged.
++2. Different-path index + `/music`: blocked. Set `/mnt/lossless` and validate
++   again: accepted, without rewriting the index.
++3. Incompatible schema: blocked; no migration or replacement offered.
++4. Unavailable NAS simulation: blocked; no scan permitted.
++5. New library: validation creates no index; confirmation is simulated only.
++
++Run `python -B preview/demonstrate_setup.py` to exercise these dialogues through
++a temporary loopback HTTP server. It prints the actual responses and stops the
++server on completion. Run `python -B -m unittest discover -s tests -v` for the
++preservation tests, including byte-for-byte hashes of all fixture files before
++and after validation and confirmation.
++
++## Run the fixture-only Docker demo
++
++Build with `docker --context desktop-linux build -f preview/Dockerfile -t
++shuffle-library-setup:demo .` (one line). Run a **new** uniquely named container on
++an unused loopback port, e.g. `127.0.0.1:8093:8092`, without disturbing the 8092
++preview. Use `--read-only --tmpfs /tmp:rw,noexec,nosuid,size=16m --cap-drop=ALL
++--security-opt=no-new-privileges`. The tmpfs holds only disposable demonstration
++fixtures. No music or database mounts are needed. This work does not start or
++deploy that container.
++
++## What a real installation will need (not enabled in this demo)
++
++- A folder readable by the Docker host. For NAS music, mount SMB/NFS on the host
++  first, or use a separately configured Docker-managed network mount. Windows
++  mapped drives must be tested for accessibility from Docker Desktop; do not
++  assume the Linux engine inherits the user's share authentication.
++- Read-only music access. Use long-form bind mounting with missing-source
++  creation disabled (`bind.create_host_path: false` in Compose). No privileged
++  app container or Docker socket is needed. The wizard will explain the mount;
++  it cannot mount arbitrary host folders from the browser.
++- Keep credentials in the host credential manager or a private mount credential
++  file outside this repository. Never enter passwords in the wizard or bake
++  them into an image, Compose file, environment file, generated command or log.
++- Keep the SQLite directory, including WAL/SHM files, and backups on persistent
++  **local** storage, separate from the NAS. Never store the only index in a
++  container's writable layer or automatically remove its volume.
++- New libraries may use `/music` inside the container. Existing indexes require
++  their original absolute path prefix, for example `/mnt/lossless`. Mount there
++  rather than changing stored paths. Set `JUKEBOX_MUSIC_ROOT` consistently and
++  align `JUKEBOX_DB_PATH` and the voice loop's `JUKEBOX_DB` in a future adapter.
++- Validate existing databases read-only and require compatible columns. The demo
++  uses immutable reads only for its own closed fixtures and rejects WAL/journal
++  files. A real adapter must use a verified consistent offline snapshot or a
++  separately reviewed read-only strategy; it must not ignore active WAL data.
++- A real indexing stage is deliberately deferred. It must retain the preserved
++  scanner's consistent backup, exclusive scan lock and mtime/size comparison,
++  while disabling schema initialization, `--force`, pruning, and automatic
++  database creation for existing indexes. It must never run the current resync
++  wrapper unchanged, because that wrapper invokes `--prune`.
++- Require explicit scan confirmation after validation, then revalidate the
++  source identity and database. Check mount identity/readability before and
++  during traversal; stop on disconnect or read errors and retain every missing
++  entry. A directory existing alone is insufficient proof that a NAS is mounted.
++  Filesystem checks can time out slowly on unavailable network mounts; the real
++  worker needs bounded execution and cancellation.
++- Interrupted incremental work should retain committed batches and skip their
++  unchanged files on retry. It still enumerates the library; it never clears or
++  fully rebuilds the index. Initial creation is allowed only for an explicitly
++  selected new library and a verified unused destination, never over an index.
++
++No production application or scanner code is changed by this demonstration.
+diff --git a/preview/demonstrate_setup.py b/preview/demonstrate_setup.py
+new file mode 100644
+index 0000000..9976e7c
+--- /dev/null
++++ b/preview/demonstrate_setup.py
+@@ -0,0 +1,51 @@
++"""Exercise the setup HTTP dialogue locally; shut down on completion."""
++import http.client
++import json
++from pathlib import Path
++import sys
++import threading
++
++sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "web"))
++import server
++
++
++def main():
++    httpd = server.dashboard.ThreadingHTTPServer(("127.0.0.1", 0), server.PreviewHandler)
++    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
++    thread.start()
++
++    def request(path, body=None):
++        client = http.client.HTTPConnection("127.0.0.1", httpd.server_port, timeout=5)
++        client.request("GET" if body is None else "POST", path,
++                       body=None if body is None else json.dumps(body),
++                       headers={} if body is None else {"Content-Type": "application/json"})
++        response = client.getresponse()
++        data = response.read()
++        client.close()
++        assert response.status == 200, (response.status, data)
++        return data
++
++    try:
++        assert b"Connect your music library" in request("/setup")
++        output = []
++        for choice in [dict(mode="existing"), dict(mode="existing", fixture="different-path"),
++                       dict(mode="existing", fixture="different-path", music_path="/mnt/lossless"),
++                       dict(mode="existing", fixture="incompatible"),
++                       dict(mode="existing", unavailable=True), dict(mode="new")]:
++            result = json.loads(request("/api/setup/validate", choice))
++            token = result.pop("confirmation_token", None)
++            output.append({"selection": choice, "result": result})
++            if token:
++                output.append({"confirmation": json.loads(request("/api/setup/confirm",
++                               {"token": token, "confirmed": True}))})
++        print(json.dumps(output, indent=2))
++    finally:
++        httpd.shutdown()
++        httpd.server_close()
++        thread.join()
++        if server.setup_demo:
++            server.setup_demo.close()
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/preview/library_setup.py b/preview/library_setup.py
+new file mode 100644
+index 0000000..ed987f8
+--- /dev/null
++++ b/preview/library_setup.py
+@@ -0,0 +1,129 @@
++"""Setup dialogue demonstration: all filesystem access stays in generated fixtures.
++
++No production scanner is imported or executed. Confirmation simulates a job only.
++"""
++from contextlib import closing
++import hashlib
++import json
++from pathlib import Path, PurePosixPath
++import secrets
++import sqlite3
++import tempfile
++import wave
++
++CONNECT = sqlite3.connect
++REQUIRED = {"path", "artist", "album", "title", "tracknumber", "year", "genre",
++            "duration", "bitrate", "samplerate", "channels", "mtime", "size",
++            "ext", "added_at", "updated_at"}
++
++
++class SetupDemo:
++    def __init__(self):
++        self.temporary = tempfile.TemporaryDirectory(prefix="shuffle-setup-demo-")
++        self.root = Path(self.temporary.name)
++        self.music = self.root / "music"
++        self.music.mkdir()
++        (self.music / ".preview-library-id").write_text("synthetic-library")
++        for name in ("unchanged.wav", "changed.wav", "new.wav"):
++            with wave.open(str(self.music / name), "wb") as audio:
++                audio.setparams((1, 2, 8000, 0, "NONE", "not compressed"))
++                audio.writeframes(b"\0\0" * 800)
++        self.pending = {}
++        self.create_fixture("existing", "/music")
++        self.create_fixture("different-path", "/mnt/lossless")
++        self.create_fixture("incompatible", "/music", incompatible=True)
++
++    def close(self):
++        self.temporary.cleanup()
++
++    def create_fixture(self, name, prefix, incompatible=False):
++        # Creation occurs ONLY in this newly allocated temporary directory.
++        with closing(CONNECT(self.root / (name + ".db"))) as con:
++            if incompatible:
++                con.execute("CREATE TABLE tracks(path TEXT PRIMARY KEY)")
++            else:
++                columns = ', '.join('"' + c + '" ' + ("INTEGER" if c in
++                    {"mtime", "size", "added_at", "updated_at"} else "TEXT") for c in sorted(REQUIRED))
++                con.execute("CREATE TABLE tracks (" + columns + ")")
++                for filename in ("unchanged.wav", "changed.wav", "missing.wav"):
++                    file = self.music / filename
++                    stat = file.stat() if file.exists() else None
++                    con.execute("INSERT INTO tracks(path,mtime,size,added_at) VALUES(?,?,?,?)",
++                                (prefix + "/" + filename,
++                                 int(stat.st_mtime) if stat and filename == "unchanged.wav" else 0,
++                                 stat.st_size if stat else 0, 123))
++            con.commit()
++
++    def validate(self, selection):
++        mode = selection.get("mode")
++        fixture = selection.get("fixture", "existing")
++        container_path = selection.get("music_path", "/music")
++        if mode not in ("existing", "new") or fixture not in ("existing", "different-path", "incompatible"):
++            return {"ok": False, "error": "Choose an offered demo index and mode."}
++        path = PurePosixPath(container_path)
++        if not path.is_absolute() or ".." in path.parts or str(path) == "/":
++            return {"ok": False, "error": "Use a specific absolute container path, such as /music."}
++        try:
++            available = self.music.is_dir() and (self.music / ".preview-library-id").read_text() == "synthetic-library"
++        except OSError:
++            available = False
++        if selection.get("unavailable") or not available:
++            return {"ok": False, "error": "Library unavailable or identity check failed. No scan or index change permitted."}
++        db = self.root / (fixture + ".db")
++        report = {"ok": True, "demo": True, "mode": mode, "schema_changed": False,
++                  "scan_started": False, "missing_policy": "Retain all missing-track entries."}
++        fingerprint = None
++        if mode == "existing":
++            # immutable prevents journal/lock creation. Never use on an active WAL database.
++            # A real adapter must require a consistent, quiescent snapshot first.
++            if any(Path(str(db) + suffix).exists() for suffix in ("-wal", "-journal")):
++                return {"ok": False, "error": "Active journal detected. Validation requires a consistent offline snapshot; no files changed."}
++            fingerprint = hashlib.sha256(db.read_bytes()).hexdigest()
++            with closing(CONNECT(db.as_uri() + "?mode=ro&immutable=1", uri=True)) as con:
++                con.execute("PRAGMA query_only=ON")
++                columns = {row[1] for row in con.execute("PRAGMA table_info(tracks)")}
++                if not REQUIRED.issubset(columns):
++                    return {"ok": False, "error": "Index schema incompatible. No migration or rebuild offered.",
++                            "missing_columns": sorted(REQUIRED - columns)}
++                rows = con.execute("SELECT path,mtime,size FROM tracks").fetchall()
++            mismatches = [value for value, _, _ in rows if not isinstance(value, str) or
++                          not PurePosixPath(value).is_absolute() or ".." in PurePosixPath(value).parts or
++                          not PurePosixPath(value).is_relative_to(path)]
++            if mismatches:
++                return {"ok": False, "error": "Stored paths do not match the container music path. Change the mount target; do not rewrite the index.",
++                        "example_stored_path": mismatches[0], "scan_started": False}
++            counts = dict(unchanged=0, changed=0, new=0, missing_retained=0)
++            indexed = set()
++            for value, mtime, size in rows:
++                relative = PurePosixPath(value).relative_to(path)
++                actual = self.music.joinpath(*relative.parts)
++                indexed.add(relative.as_posix())
++                if not actual.exists():
++                    counts["missing_retained"] += 1
++                else:
++                    stat = actual.stat()
++                    counts["unchanged" if mtime != 0 and int(stat.st_mtime) == mtime and stat.st_size == size else "changed"] += 1
++            counts["new"] = sum(p.name not in indexed for p in self.music.glob("*.wav"))
++            report.update(track_count=len(rows), plan=counts, sha256=fingerprint)
++        else:
++            report["message"] = "New-library mode selected. No index created. First indexing requires explicit confirmation; this demo only simulates it."
++        token = secrets.token_urlsafe(24)
++        self.pending[token] = (dict(selection), fingerprint)
++        report["confirmation_token"] = token
++        return report
++
++    def confirm(self, request):
++        if request.get("confirmed") is not True:
++            return {"ok": False, "error": "Explicit confirmation is required. Nothing started."}
++        pending = self.pending.pop(request.get("token"), None)
++        if pending is None:
++            return {"ok": False, "error": "Validate again before confirming."}
++        selection, fingerprint = pending
++        result = self.validate(selection)
++        self.pending.pop(result.get("confirmation_token"), None)
++        if not result["ok"]:
++            return result
++        if fingerprint and result.get("sha256") != fingerprint:
++            return {"ok": False, "error": "Index changed since validation. Validate again."}
++        return {"ok": True, "simulated": True, "scan_started": False,
++                "message": "Confirmation accepted for demonstration. No scanner executed and no database created or changed."}
+diff --git a/preview/server.py b/preview/server.py
+index 35358e1..fc1cf93 100644
+--- a/preview/server.py
++++ b/preview/server.py
+@@ -1,15 +1,21 @@
+ """Isolated synthetic preview. No database, scanner, service or IPC access."""
+ import io
++import json
+ import math
+ from pathlib import Path
+ import sqlite3
+ import struct
+ import subprocess
++import threading
+ import urllib.request
+ import wave
+ from urllib.parse import urlparse
+ 
+ import control_server as dashboard
++from library_setup import SetupDemo
++
++setup_demo = None
++setup_lock = threading.Lock()
+ 
+ def forbidden(*args, **kwargs):
+     raise RuntimeError("Production interfaces are disabled in this preview")
+@@ -71,6 +77,9 @@ class PreviewHandler(dashboard.Handler):
+ 
+     def do_GET(self):
+         path = urlparse(self.path).path
++        if path == "/setup":
++            return self.content(Path(__file__).with_name("setup.html").read_text(encoding="utf-8"),
++                                "text/html; charset=utf-8")
+         if path in ("/api/nowplaying", "/nowplaying.json"):
+             return self._json(nowplaying())
+         if path == "/voice_last.json":
+@@ -108,7 +117,7 @@ class PreviewHandler(dashboard.Handler):
+             description = "Audio and library information are synthetic. The tone pulses twice per second, with a quiet gap every four seconds."
+             html = dashboard.DASHBOARD_HTML.replace('<h1>Shuffle Control</h1>',
+                 '<h1>Shuffle Control Â· Local Preview</h1><p>All controls are simulated. '
+-                + description + '</p>')
++                + description + '</p><p><a href="/setup">Connect your music library — safe demo</a></p>')
+             return self.content(html, "text/html; charset=utf-8")
+         return super().do_GET()
+ 
+@@ -128,8 +137,28 @@ class PreviewHandler(dashboard.Handler):
+         return self._json({"ok": True, "simulated": True})
+ 
+     def do_POST(self):
+-        global track
++        global track, setup_demo
+         path = urlparse(self.path).path
++        if path in ("/api/setup/validate", "/api/setup/confirm"):
++            if self.headers.get("Content-Type") != "application/json":
++                return self._json({"ok": False, "error": "JSON required"}, 415)
++            origin = self.headers.get("Origin")
++            if origin and urlparse(origin).netloc != self.headers.get("Host"):
++                return self._json({"ok": False, "error": "Same-origin request required"}, 403)
++            try:
++                length = int(self.headers.get("Content-Length", "0"))
++                if not 0 < length <= 4096:
++                    raise ValueError("Invalid request length")
++                request = json.loads(self.rfile.read(length))
++                if not isinstance(request, dict):
++                    raise ValueError("Expected object")
++                with setup_lock:
++                    if setup_demo is None:
++                        setup_demo = SetupDemo()
++                    result = setup_demo.validate(request) if path.endswith("validate") else setup_demo.confirm(request)
++                return self._json(result)
++            except (ValueError, TypeError):
++                return self._json({"ok": False, "error": "Invalid setup request"}, 400)
+         if path == "/api/library/resync":
+             return self._json({"ok": True, "output": "Preview only: no scan executed; 3 synthetic tracks unchanged."})
+         if path in ("/control/next", "/control/prev", "/control/shuffle"):
+diff --git a/preview/setup.html b/preview/setup.html
+new file mode 100644
+index 0000000..a72068f
+--- /dev/null
++++ b/preview/setup.html
+@@ -0,0 +1,61 @@
++<!doctype html>
++<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>Connect your music library</title>
++<style>
++body{font:16px/1.6 system-ui;background:#10151c;color:#eef3f6;max-width:850px;margin:auto;padding:24px}
++section{background:#1c2632;border:1px solid #354958;padding:20px;border-radius:12px;margin:20px 0}
++label{display:block;margin:12px 0}input,select,button{font:inherit;padding:8px;border-radius:6px;max-width:100%}
++button{cursor:pointer;background:#a9edcd;color:#10251e;border:0}button:disabled{opacity:.45;cursor:default}
++a{color:#a9edcd}code,pre{background:#10151c;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
++.notice{color:#ffd28c}fieldset{border:0;padding:0}#result{display:block;white-space:pre-wrap}
++</style>
++<h1>Connect your music library</h1>
++<p class="notice">Safe setup demonstration: only generated temporary music files and databases are available.
++No NAS connection, credentials, real indexing, or production data access.</p>
++<a href="/">Back to the synthetic dashboard</a>
++<form id="setup">
++<section><h2>1. Make your folder available to Docker</h2>
++<label>Library location <select id="location"><option value="local">Local folder</option><option value="nas">NAS / network share</option></select></label>
++<p id="instructions">Choose an existing folder on the Docker host. A browser folder picker cannot mount it into a container.</p>
++<p>Mount music read-only. Keep the SQLite data directory on persistent local storage, separate from your music.
++Use a host-side mount or credential manager for NAS authentication; never put passwords in Compose, Git, or the image.</p>
++<pre>Host folder → read-only container music folder
++Local persistent data directory → container /data</pre>
++<p>For NAS storage, confirm Docker can read the mounted share. A mapped Windows drive is not automatically accessible to Linux containers.
++Missing mounts must stop setup, not silently create an empty music folder.</p></section>
++<section><h2>2. Choose your index</h2>
++<label>Index mode <select id="mode"><option value="existing">Use an existing SQLite index</option><option value="new">New library — no existing index</option></select></label>
++<label id="fixtureLabel">Demo index <select id="fixture"><option value="existing">Compatible index</option><option value="different-path">Index with paths under /mnt/lossless</option><option value="incompatible">Incompatible schema</option></select></label>
++<label>Container music path <input id="musicPath" value="/music" required></label>
++<p>The container path must match the paths already in an existing index. Change the Docker mount target to match;
++we will not rewrite paths or migrate the index. New users can use /music.</p>
++<label><input type="checkbox" id="unavailable"> Simulate an unavailable NAS</label></section>
++<section><h2>3. Validate safely</h2>
++<p>Validation opens an existing demo index read-only, checks its columns and paths, and previews incremental changes.
++It never changes schema or entries. Missing tracks remain indexed.</p>
++<button type="submit">Validate setup — no scan</button>
++<output id="result" aria-live="polite">No validation or scan has started.</output></section>
++<section><h2>4. Review and confirm</h2>
++<p>Incremental indexing checks file modification time and size, skips unchanged tracks, and reads tags only for new or changed files.
++It still walks the library. There is no reset, full rebuild, migration, or prune option.</p>
++<label><input type="checkbox" id="consent"> I reviewed the validation and want to simulate starting incremental indexing.</label>
++<button id="confirm" type="button" disabled>Confirm simulated indexing</button>
++<p class="notice">This first-stage demo cannot start a real scan, even after confirmation. Existing scanner fixes remain preserved.</p></section>
++</form>
++<script>
++let token=null;
++const el=id=>document.getElementById(id);
++function invalidate(){token=null;el('consent').checked=false;el('confirm').disabled=true;el('result').textContent='Settings changed. Validate again; no scan started.';}
++el('setup').addEventListener('change',event=>{if(event.target.id!=='consent')invalidate();});
++el('location').onchange=()=>{el('instructions').textContent=el('location').value==='nas'?
++ 'Mount your SMB/NFS share on the Docker host first, using read-only access and credentials stored outside this project. Then expose that mounted folder to the container.':
++ 'Choose an existing folder on the Docker host. A browser folder picker cannot mount it into a container.';};
++el('mode').onchange=()=>{el('fixtureLabel').hidden=el('mode').value==='new';};
++el('consent').onchange=()=>{el('confirm').disabled=!(token&&el('consent').checked);};
++async function send(path,data){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!response.ok)throw Error('Request failed: '+response.status);return response.json();}
++el('setup').onsubmit=async event=>{event.preventDefault();invalidate();try{
++ const result=await send('/api/setup/validate',{mode:el('mode').value,fixture:el('fixture').value,music_path:el('musicPath').value,unavailable:el('unavailable').checked});
++ token=result.confirmation_token||null;const visible={...result};delete visible.confirmation_token;el('result').textContent=JSON.stringify(visible,null,2);
++ }catch(error){el('result').textContent=error.message;}};
++el('confirm').onclick=async()=>{el('confirm').disabled=true;try{const result=await send('/api/setup/confirm',{token,confirmed:el('consent').checked});token=null;el('result').textContent=JSON.stringify(result,null,2);}catch(error){token=null;el('result').textContent=error.message;}};
++</script></html>
+diff --git a/tests/test_library_setup.py b/tests/test_library_setup.py
+new file mode 100644
+index 0000000..cd2b47a
+--- /dev/null
++++ b/tests/test_library_setup.py
+@@ -0,0 +1,92 @@
++import hashlib
++import importlib.util
++from pathlib import Path
++import unittest
++
++spec = importlib.util.spec_from_file_location("library_setup", Path(__file__).resolve().parents[1] / "preview/library_setup.py")
++module = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(module)
++
++
++class SetupTests(unittest.TestCase):
++    def setUp(self):
++        self.demo = module.SetupDemo()
++        self.addCleanup(self.demo.close)
++        self.before = self.snapshot()
++
++    def snapshot(self):
++        return {str(p.relative_to(self.demo.root)): hashlib.sha256(p.read_bytes()).hexdigest()
++                for p in self.demo.root.rglob("*") if p.is_file()}
++
++    def tearDown(self):
++        self.assertEqual(self.before, self.snapshot(), "Validation/confirmation wrote fixture data")
++
++    def validate(self, **kwargs):
++        return self.demo.validate(dict(mode="existing", fixture="existing", music_path="/music", **kwargs))
++
++    def test_compatible_and_explicit_confirmation(self):
++        result = self.validate()
++        self.assertTrue(result["ok"])
++        self.assertEqual(result["plan"], dict(unchanged=1, changed=1, new=1, missing_retained=1))
++        token = result["confirmation_token"]
++        self.assertFalse(self.demo.confirm({"token": token})["ok"])
++        confirmed = self.demo.confirm({"token": token, "confirmed": True})
++        self.assertTrue(confirmed["simulated"])
++        self.assertFalse(confirmed["scan_started"])
++        self.assertFalse(self.demo.confirm({"token": token, "confirmed": True})["ok"])
++
++    def test_paths_require_matching_container_mount(self):
++        choice = dict(mode="existing", fixture="different-path", music_path="/music")
++        self.assertFalse(self.demo.validate(choice)["ok"])
++        choice["music_path"] = "/mnt/lossless"
++        self.assertTrue(self.demo.validate(choice)["ok"])
++        choice["music_path"] = "/mnt/loss"
++        self.assertFalse(self.demo.validate(choice)["ok"])
++
++    def test_incompatible_and_unavailable_block(self):
++        result = self.demo.validate(dict(mode="existing", fixture="incompatible"))
++        self.assertFalse(result["ok"])
++        self.assertIn("missing_columns", result)
++        self.assertFalse(self.validate(unavailable=True)["ok"])
++
++    def test_revalidate_source_after_confirmation(self):
++        result = self.validate()
++        marker = self.demo.music / ".preview-library-id"
++        original = marker.read_bytes()
++        marker.unlink()  # Only our generated temporary fixture.
++        try:
++            self.assertFalse(self.demo.confirm(dict(token=result["confirmation_token"], confirmed=True))["ok"])
++        finally:
++            marker.write_bytes(original)
++
++    def test_new_library_does_not_create_index(self):
++        result = self.demo.validate(dict(mode="new"))
++        self.assertTrue(result["ok"])
++        self.assertTrue(self.demo.confirm(dict(token=result["confirmation_token"], confirmed=True))["simulated"])
++
++    def test_changed_index_requires_validation_again(self):
++        result = self.validate()
++        db = self.demo.root / "existing.db"
++        original = db.read_bytes()
++        try:
++            with module.CONNECT(db) as con:
++                con.execute("UPDATE tracks SET title='temporary fixture change'")
++            self.assertFalse(self.demo.confirm(dict(token=result["confirmation_token"], confirmed=True))["ok"])
++        finally:
++            db.write_bytes(original)
++
++    def test_unoffered_files_and_traversal_blocked(self):
++        self.assertFalse(self.demo.validate(dict(mode="existing", fixture="../../production"))["ok"])
++        self.assertFalse(self.demo.validate(dict(mode="existing", music_path="/music/../other"))["ok"])
++
++    def test_active_wal_rejected_without_reading_it(self):
++        wal = self.demo.root / "existing.db-wal"
++        wal.write_bytes(b"synthetic journal")
++        try:
++            self.assertFalse(self.validate()["ok"])
++        finally:
++            wal.unlink()
++
++
++if __name__ == "__main__":
++    unittest.main()

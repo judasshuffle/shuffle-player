@@ -9,3 +9,5 @@
 !web/shufflizer/js/**
 !preview/
 !preview/server.py
+!preview/library_setup.py
+!preview/setup.html

@@ -1,15 +1,21 @@
 """Isolated synthetic preview. No database, scanner, service or IPC access."""
 import io
+import json
 import math
 from pathlib import Path
 import sqlite3
 import struct
 import subprocess
+import threading
 import urllib.request
 import wave
 from urllib.parse import urlparse
 
 import control_server as dashboard
+from library_setup import SetupDemo
+
+setup_demo = None
+setup_lock = threading.Lock()
 
 def forbidden(*args, **kwargs):
     raise RuntimeError("Production interfaces are disabled in this preview")
@@ -71,6 +77,9 @@ class PreviewHandler(dashboard.Handler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/setup":
+            return self.content(Path(__file__).with_name("setup.html").read_text(encoding="utf-8"),
+                                "text/html; charset=utf-8")
         if path in ("/api/nowplaying", "/nowplaying.json"):
             return self._json(nowplaying())
         if path == "/voice_last.json":
@@ -108,7 +117,7 @@ class PreviewHandler(dashboard.Handler):
             description = "Audio and library information are synthetic. The tone pulses twice per second, with a quiet gap every four seconds."
             html = dashboard.DASHBOARD_HTML.replace('<h1>Shuffle Control</h1>',
                 '<h1>Shuffle Control Â· Local Preview</h1><p>All controls are simulated. '
-                + description + '</p>')
+                + description + '</p><p><a href="/setup">Connect your music library — safe demo</a></p>')
             return self.content(html, "text/html; charset=utf-8")
         return super().do_GET()
 
@@ -128,8 +137,28 @@ class PreviewHandler(dashboard.Handler):
         return self._json({"ok": True, "simulated": True})
 
     def do_POST(self):
-        global track
+        global track, setup_demo
         path = urlparse(self.path).path
+        if path in ("/api/setup/validate", "/api/setup/confirm"):
+            if self.headers.get("Content-Type") != "application/json":
+                return self._json({"ok": False, "error": "JSON required"}, 415)
+            origin = self.headers.get("Origin")
+            if origin and urlparse(origin).netloc != self.headers.get("Host"):
+                return self._json({"ok": False, "error": "Same-origin request required"}, 403)
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 4096:
+                    raise ValueError("Invalid request length")
+                request = json.loads(self.rfile.read(length))
+                if not isinstance(request, dict):
+                    raise ValueError("Expected object")
+                with setup_lock:
+                    if setup_demo is None:
+                        setup_demo = SetupDemo()
+                    result = setup_demo.validate(request) if path.endswith("validate") else setup_demo.confirm(request)
+                return self._json(result)
+            except (ValueError, TypeError):
+                return self._json({"ok": False, "error": "Invalid setup request"}, 400)
         if path == "/api/library/resync":
             return self._json({"ok": True, "output": "Preview only: no scan executed; 3 synthetic tracks unchanged."})
         if path in ("/control/next", "/control/prev", "/control/shuffle"):

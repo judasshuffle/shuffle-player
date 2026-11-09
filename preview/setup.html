@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect your music library</title>
+<style>
+body{font:16px/1.6 system-ui;background:#10151c;color:#eef3f6;max-width:850px;margin:auto;padding:24px}
+section{background:#1c2632;border:1px solid #354958;padding:20px;border-radius:12px;margin:20px 0}
+label{display:block;margin:12px 0}input,select,button{font:inherit;padding:8px;border-radius:6px;max-width:100%}
+button{cursor:pointer;background:#a9edcd;color:#10251e;border:0}button:disabled{opacity:.45;cursor:default}
+a{color:#a9edcd}code,pre{background:#10151c;padding:8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.notice{color:#ffd28c}fieldset{border:0;padding:0}#result{display:block;white-space:pre-wrap}
+</style>
+<h1>Connect your music library</h1>
+<p class="notice">Safe setup demonstration: only generated temporary music files and databases are available.
+No NAS connection, credentials, real indexing, or production data access.</p>
+<a href="/">Back to the synthetic dashboard</a>
+<form id="setup">
+<section><h2>1. Make your folder available to Docker</h2>
+<label>Library location <select id="location"><option value="local">Local folder</option><option value="nas">NAS / network share</option></select></label>
+<p id="instructions">Choose an existing folder on the Docker host. A browser folder picker cannot mount it into a container.</p>
+<p>Mount music read-only. Keep the SQLite data directory on persistent local storage, separate from your music.
+Use a host-side mount or credential manager for NAS authentication; never put passwords in Compose, Git, or the image.</p>
+<pre>Host folder → read-only container music folder
+Local persistent data directory → container /data</pre>
+<p>For NAS storage, confirm Docker can read the mounted share. A mapped Windows drive is not automatically accessible to Linux containers.
+Missing mounts must stop setup, not silently create an empty music folder.</p></section>
+<section><h2>2. Choose your index</h2>
+<label>Index mode <select id="mode"><option value="existing">Use an existing SQLite index</option><option value="new">New library — no existing index</option></select></label>
+<label id="fixtureLabel">Demo index <select id="fixture"><option value="existing">Compatible index</option><option value="different-path">Index with paths under /mnt/lossless</option><option value="incompatible">Incompatible schema</option></select></label>
+<label>Container music path <input id="musicPath" value="/music" required></label>
+<p>The container path must match the paths already in an existing index. Change the Docker mount target to match;
+we will not rewrite paths or migrate the index. New users can use /music.</p>
+<label><input type="checkbox" id="unavailable"> Simulate an unavailable NAS</label></section>
+<section><h2>3. Validate safely</h2>
+<p>Validation opens an existing demo index read-only, checks its columns and paths, and previews incremental changes.
+It never changes schema or entries. Missing tracks remain indexed.</p>
+<button type="submit">Validate setup — no scan</button>
+<output id="result" aria-live="polite">No validation or scan has started.</output></section>
+<section><h2>4. Review and confirm</h2>
+<p>Incremental indexing checks file modification time and size, skips unchanged tracks, and reads tags only for new or changed files.
+It still walks the library. There is no reset, full rebuild, migration, or prune option.</p>
+<label><input type="checkbox" id="consent"> I reviewed the validation and want to simulate starting incremental indexing.</label>
+<button id="confirm" type="button" disabled>Confirm simulated indexing</button>
+<p class="notice">This first-stage demo cannot start a real scan, even after confirmation. Existing scanner fixes remain preserved.</p></section>
+</form>
+<script>
+let token=null;
+const el=id=>document.getElementById(id);
+function invalidate(){token=null;el('consent').checked=false;el('confirm').disabled=true;el('result').textContent='Settings changed. Validate again; no scan started.';}
+el('setup').addEventListener('change',event=>{if(event.target.id!=='consent')invalidate();});
+el('location').onchange=()=>{el('instructions').textContent=el('location').value==='nas'?
+ 'Mount your SMB/NFS share on the Docker host first, using read-only access and credentials stored outside this project. Then expose that mounted folder to the container.':
+ 'Choose an existing folder on the Docker host. A browser folder picker cannot mount it into a container.';};
+el('mode').onchange=()=>{el('fixtureLabel').hidden=el('mode').value==='new';};
+el('consent').onchange=()=>{el('confirm').disabled=!(token&&el('consent').checked);};
+async function send(path,data){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});if(!response.ok)throw Error('Request failed: '+response.status);return response.json();}
+el('setup').onsubmit=async event=>{event.preventDefault();invalidate();try{
+ const result=await send('/api/setup/validate',{mode:el('mode').value,fixture:el('fixture').value,music_path:el('musicPath').value,unavailable:el('unavailable').checked});
+ token=result.confirmation_token||null;const visible={...result};delete visible.confirmation_token;el('result').textContent=JSON.stringify(visible,null,2);
+ }catch(error){el('result').textContent=error.message;}};
+el('confirm').onclick=async()=>{el('confirm').disabled=true;try{const result=await send('/api/setup/confirm',{token,confirmed:el('consent').checked});token=null;el('result').textContent=JSON.stringify(result,null,2);}catch(error){token=null;el('result').textContent=error.message;}};
+</script></html>
