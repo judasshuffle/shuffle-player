@@ -1,0 +1,11 @@
+**
+!web/
+!web/control_server.py
+!web/shufflizer/
+!web/shufflizer/index.html
+!web/shufflizer/css/
+!web/shufflizer/css/*.css
+!web/shufflizer/js/
+!web/shufflizer/js/**
+!preview/
+!preview/server.py
