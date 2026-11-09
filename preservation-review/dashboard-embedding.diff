@@ -1,0 +1,455 @@
+diff --git a/tests/test_dashboard.py b/tests/test_dashboard.py
+new file mode 100644
+index 0000000..8785df2
+--- /dev/null
++++ b/tests/test_dashboard.py
+@@ -0,0 +1,87 @@
++"""Local HTTP checks with temporary assets and mocked production interfaces."""
++import importlib.util
++import json
++from pathlib import Path
++import shutil
++import sqlite3
++import subprocess
++import tempfile
++import threading
++import unittest
++from unittest.mock import patch
++from urllib.error import HTTPError
++from urllib.request import Request, urlopen
++
++
++PROJECT = Path(__file__).resolve().parents[1]
++spec = importlib.util.spec_from_file_location("dashboard", PROJECT / "web/control_server.py")
++dashboard = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(dashboard)
++
++
++class DashboardTests(unittest.TestCase):
++    def test_dashboard_and_standalone_with_isolated_interfaces(self):
++        with tempfile.TemporaryDirectory() as directory:
++            root = Path(directory) / "visualizer"
++            shutil.copytree(PROJECT / "web/shufflizer", root)
++            (root / "test-cover.jpg").write_bytes(b"temporary artwork fixture")
++            scanner = Path(directory) / "scanner.sh"
++            scanner.write_text("# test placeholder; never executed\n")
++            with patch.object(dashboard, "ROOT", str(root)), \
++                 patch.object(dashboard, "RESYNC_SCRIPT", str(scanner)), \
++                 patch.object(dashboard, "run") as run, \
++                 patch.object(dashboard, "mpv_command") as mpv, \
++                 patch.object(dashboard, "read_nowplaying", return_value={
++                     "text": "Test Artist — Test Track", "album": "Test Album",
++                     "art_url": "/test-cover.jpg"}), \
++                 patch.object(dashboard, "get_library_stats", return_value={"track_count": 3}), \
++                 patch.object(subprocess, "run", side_effect=AssertionError("External process forbidden")), \
++                 patch.object(sqlite3, "connect", side_effect=AssertionError("Database access forbidden")):
++                run.return_value = subprocess.CompletedProcess([], 0, "Synthetic scan result", "")
++                server = dashboard.ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
++                thread = threading.Thread(target=server.serve_forever, daemon=True)
++                thread.start()
++                base = "http://127.0.0.1:" + str(server.server_port)
++
++                def get(path):
++                    with urlopen(base + path, timeout=5) as response:
++                        return response.read()
++
++                def post(path):
++                    with urlopen(Request(base + path, method="POST"), timeout=5) as response:
++                        return json.load(response)
++
++                try:
++                    html = get("/").decode()
++                    self.assertEqual(get("/control").decode(), html)
++                    self.assertIn('/index.html?embed=1', html)
++                    for retained in ("coverArt", "npText", "npAlbum", "refreshNowPlaying",
++                                     "refreshLibraryStats", "shuffleAll", "nextTrack", "prevTrack",
++                                     "outputCtl", "systemCtl", "updateLibrary"):
++                        self.assertIn(retained, html)
++                    for removed in ("vuLeft", "vuRight", "refreshVu", "/api/vu", "vu-wrap"):
++                        self.assertNotIn(removed, html)
++                    standalone = get("/index.html")
++                    self.assertEqual(get("/index.html?embed=1"), standalone)
++                    for asset in ("/js/main.js", "/js/audio.js", "/js/engine.js", "/css/style.css"):
++                        self.assertTrue(get(asset))
++                    self.assertIn("Test Track", json.loads(get("/api/nowplaying"))["text"])
++                    self.assertEqual(get("/test-cover.jpg"), b"temporary artwork fixture")
++                    self.assertEqual(json.loads(get("/api/library/stats"))["track_count"], 3)
++                    run.assert_not_called()  # Loading the dashboard never starts a scan.
++                    self.assertTrue(post("/control/next")["ok"])
++                    mpv.assert_called_once_with(["playlist-next", "force"])
++                    self.assertEqual(post("/api/library/resync")["output"], "Synthetic scan result")
++                    run.assert_called_once_with([str(scanner)])  # Mock only; no scanner executes.
++                    with self.assertRaises(HTTPError) as error:
++                        get("/api/vu")
++                    self.assertEqual(error.exception.code, 400)
++                    self.assertEqual(dashboard.PORT, 8091)
++                finally:
++                    server.shutdown()
++                    server.server_close()
++                    thread.join()
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/web/control_server.py b/web/control_server.py
+index 9edd238..d2e835f 100644
+--- a/web/control_server.py
++++ b/web/control_server.py
+@@ -7,7 +7,6 @@ import os
+ import subprocess
+ import socket
+ import urllib.request
+-import re
+ import time
+ 
+ ROOT = "/home/dan/shuffle-player/web/shufflizer"
+@@ -28,12 +27,6 @@ GROUPS = {
+     "everything": ["icecast"],
+ }
+ 
+-AUDIO_ENV = {
+-    **os.environ,
+-    "XDG_RUNTIME_DIR": "/run/user/1000",
+-    "PULSE_SERVER": "unix:/run/user/1000/pulse/native",
+-}
+-
+ _LAST_COVER_TRACK = None
+ _LAST_COVER_URL = ""
+ 
+@@ -284,74 +277,6 @@ def get_nowplaying_art(nowplaying_data):
+     return ""
+ 
+ 
+-def db_to_percent(db_value):
+-    if db_value is None:
+-        return 0
+-
+-    db_value = max(-60.0, min(0.0, db_value))
+-    return int(round(((db_value + 60.0) / 60.0) * 100))
+-
+-
+-def get_vu_levels():
+-    cmd = [
+-        "/usr/bin/ffmpeg",
+-        "-nostdin",
+-        "-hide_banner",
+-        "-nostats",
+-        "-loglevel",
+-        "info",
+-        "-f",
+-        "pulse",
+-        "-i",
+-        "radio_sink.monitor",
+-        "-t",
+-        "0.15",
+-        "-af",
+-        "astats=metadata=0:reset=1:measure_perchannel=Peak_level",
+-        "-f",
+-        "null",
+-        "-",
+-    ]
+-
+-    try:
+-        r = subprocess.run(
+-            cmd,
+-            capture_output=True,
+-            text=True,
+-            timeout=3,
+-            env=AUDIO_ENV,
+-        )
+-        text = (r.stdout or "") + "\n" + (r.stderr or "")
+-        peaks = [float(x) for x in re.findall(r"Peak level dB:\s*(-?\d+(?:\.\d+)?)", text)]
+-
+-        if len(peaks) >= 2:
+-            left_db, right_db = peaks[0], peaks[1]
+-        elif len(peaks) == 1:
+-            left_db = right_db = peaks[0]
+-        else:
+-            return {
+-                "left": 0,
+-                "right": 0,
+-                "left_db": None,
+-                "right_db": None,
+-            }
+-
+-        return {
+-            "left": db_to_percent(left_db),
+-            "right": db_to_percent(right_db),
+-            "left_db": left_db,
+-            "right_db": right_db,
+-        }
+-
+-    except Exception:
+-        return {
+-            "left": 0,
+-            "right": 0,
+-            "left_db": None,
+-            "right_db": None,
+-        }
+-
+-
+ def get_output_status():
+     mp3_on = icecast_mp3_active()
+     snapserver_on = is_active("snapserver.service")
+@@ -494,12 +419,14 @@ DASHBOARD_HTML = """
+ 
+ <style>
+ body{
+-  background:#0f1117;
++  background:radial-gradient(circle at 85% -10%,#34304a 0,transparent 36%),#0f1117;
+   color:#e6e6e6;
+   font-family:system-ui;
+-  margin:40px;
++  margin:0 auto;
++  padding:24px clamp(16px,4vw,48px) 48px;
++  max-width:1500px;
+ }
+-h1{ margin-bottom:30px; }
++h1{ margin:0 0 24px; letter-spacing:.04em; }
+ .grid{
+   display:grid;
+   grid-template-columns:repeat(auto-fit,minmax(320px,1fr));
+@@ -509,8 +436,33 @@ h1{ margin-bottom:30px; }
+   background:#1b1f2a;
+   padding:20px;
+   border-radius:12px;
++  border:1px solid rgba(255,255,255,.07);
+ }
+ .card-wide{ grid-column:1 / -1; }
++.visualizer-card{
++  background:linear-gradient(145deg,#222435,#191d28 50%,#161c27);
++  border-color:rgba(241,142,63,.28);
++  box-shadow:0 18px 50px rgba(0,0,0,.18);
++}
++.visualizer-header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
++.visualizer-header h3{margin:0 0 12px}
++.visualizer-frame{
++  position:relative;
++  overflow:hidden;
++  border-radius:12px;
++  border:1px solid rgba(241,142,63,.38);
++  background:#070a0d;
++  box-shadow:inset 0 0 35px rgba(241,142,63,.12);
++}
++.visualizer-frame:after{
++  content:"";position:absolute;inset:0;pointer-events:none;
++  background:repeating-linear-gradient(to bottom,transparent 0 3px,rgba(0,0,0,.07) 4px);
++}
++.visualizer-frame iframe{
++  display:block;width:100%;height:clamp(320px,48vw,570px);border:0;
++}
++.visualizer-hint{margin:12px 0 0}
++@media(max-width:600px){.grid{grid-template-columns:minmax(0,1fr)}.card{padding:16px}}
+ button{
+   background:#2b3142;
+   border:none;
+@@ -576,39 +528,6 @@ button:hover{ background:#3a4156; }
+   flex:1 1 320px;
+   min-width:260px;
+ }
+-.vu-wrap{
+-  margin-top:16px;
+-}
+-.vu-row{
+-  display:grid;
+-  grid-template-columns:36px 1fr 46px;
+-  gap:10px;
+-  align-items:center;
+-  margin-top:8px;
+-}
+-.vu-label{
+-  font-size:.85rem;
+-  opacity:.85;
+-}
+-.vu-bar{
+-  width:100%;
+-  height:14px;
+-  background:#0d1017;
+-  border-radius:999px;
+-  overflow:hidden;
+-  border:1px solid rgba(255,255,255,.08);
+-}
+-.vu-fill{
+-  height:100%;
+-  width:0%;
+-  background:linear-gradient(90deg,#00ff99,#ffd166,#ff4d4d);
+-  transition:width .08s linear;
+-}
+-.vu-value{
+-  text-align:right;
+-  font-size:.85rem;
+-  opacity:.8;
+-}
+ </style>
+ </head>
+ 
+@@ -617,6 +536,17 @@ button:hover{ background:#3a4156; }
+ 
+ <div class="grid">
+ 
++  <div class="card card-wide visualizer-card">
++    <div class="visualizer-header">
++      <h3>Shufflizer · Live Visuals</h3>
++      <a class="link" href="/index.html" target="_blank" rel="noopener">Open full visualizer ↗</a>
++    </div>
++    <div class="visualizer-frame">
++      <iframe src="/index.html?embed=1" title="Shufflizer music visualizer" loading="lazy" allow="autoplay"></iframe>
++    </div>
++    <p class="small visualizer-hint">Press play in the visualizer to connect to the stream. It starts muted so your speakers don't play twice.</p>
++  </div>
++
+   <div class="card card-wide">
+     <h3>Now Playing</h3>
+     <div class="nowplaying-wrap">
+@@ -629,21 +559,6 @@ button:hover{ background:#3a4156; }
+         <div id="npText" class="value">Loading…</div>
+         <div id="npAlbum" class="small"></div>
+ 
+-        <div class="vu-wrap">
+-          <div class="small">Level</div>
+-
+-          <div class="vu-row">
+-            <div class="vu-label">L</div>
+-            <div class="vu-bar"><div id="vuLeft" class="vu-fill"></div></div>
+-            <div id="vuLeftVal" class="vu-value">0%</div>
+-          </div>
+-
+-          <div class="vu-row">
+-            <div class="vu-label">R</div>
+-            <div class="vu-bar"><div id="vuRight" class="vu-fill"></div></div>
+-            <div id="vuRightVal" class="vu-value">0%</div>
+-          </div>
+-        </div>
+       </div>
+     </div>
+   </div>
+@@ -718,10 +633,6 @@ button:hover{ background:#3a4156; }
+     <button onclick="systemCtl('shutdown')">Shutdown Pi</button>
+   </div>
+ 
+-  <div class="card">
+-    <a class="link" href="/index.html" target="_blank">Open Shufflizer</a>
+-  </div>
+-
+ </div>
+ 
+ <script>
+@@ -763,26 +674,6 @@ async function refreshNowPlaying(){
+   }
+ }
+ 
+-async function refreshVu(){
+-  try {
+-    const r = await fetch('/api/vu');
+-    const j = await r.json();
+-
+-    const l = Math.max(0, Math.min(100, j.left || 0));
+-    const rr = Math.max(0, Math.min(100, j.right || 0));
+-
+-    document.getElementById('vuLeft').style.width = l + '%';
+-    document.getElementById('vuRight').style.width = rr + '%';
+-    document.getElementById('vuLeftVal').textContent = l + '%';
+-    document.getElementById('vuRightVal').textContent = rr + '%';
+-  } catch(e) {
+-    document.getElementById('vuLeft').style.width = '0%';
+-    document.getElementById('vuRight').style.width = '0%';
+-    document.getElementById('vuLeftVal').textContent = '0%';
+-    document.getElementById('vuRightVal').textContent = '0%';
+-  }
+-}
+-
+ async function refreshLibraryStats(){
+   const r = await fetch('/api/library/stats');
+   const j = await r.json();
+@@ -906,7 +797,6 @@ async function systemCtl(action){
+ 
+ refreshAll();
+ setInterval(refreshAll, 3000);
+-setInterval(refreshVu, 250);
+ </script>
+ </body>
+ </html>
+@@ -995,9 +885,6 @@ class Handler(SimpleHTTPRequestHandler):
+         if u.path == "/api/nowplaying":
+             return self._json(read_nowplaying())
+ 
+-        if u.path == "/api/vu":
+-            return self._json(get_vu_levels())
+-
+         if u.path == "/api/library/stats":
+             return self._json(get_library_stats())
+ 
+@@ -1058,4 +945,4 @@ class Handler(SimpleHTTPRequestHandler):
+ 
+ if __name__ == "__main__":
+     os.chdir(ROOT)
+-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+\ No newline at end of file
++    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+diff --git a/web/shufflizer/css/style.css b/web/shufflizer/css/style.css
+index 1d2d09b..cad142f 100644
+--- a/web/shufflizer/css/style.css
++++ b/web/shufflizer/css/style.css
+@@ -100,3 +100,29 @@ body.ui-hidden #ui {
+   animation: voiceIn 180ms ease-out, voiceFlicker 700ms ease-in-out infinite, voiceJitter 1200ms ease-in-out infinite;
+ }
+ 
++/* The dashboard embeds this same visualizer; the standalone controls stay intact. */
++.embedded #ui {
++  top: 12px;
++  left: 12px;
++  right: 12px;
++  min-width: 0;
++  max-width: 640px;
++  padding: 10px 14px;
++  border-color: rgba(241,142,63,.55);
++  border-radius: 10px;
++  background: rgba(10,13,19,.82);
++  backdrop-filter: blur(12px);
++  color: #ffe3bc;
++  box-shadow: 0 12px 32px rgba(0,0,0,.3);
++}
++.embedded #ui > :not(.row):not(audio):not(#paletteRow),
++.embedded #ui > .row:not(:nth-child(1)):not(:nth-child(2)):not(.audio-options) { display: none !important; }
++.embedded #ui .row { grid-template-columns: 68px minmax(0,1fr); }
++.embedded #ui select { width: 100%; min-width: 0; }
++.embedded #ui audio#audio { margin-top: 12px; height: 36px; }
++.embedded #paletteRow { font-size: 12px; }
++.embedded #paletteRow select { width: auto; max-width: min(220px,65vw); }
++.embedded body.ui-hidden #ui { opacity: 1; pointer-events: auto; transform: none; }
++@media (max-width: 480px) {
++  .embedded #ui { right: 10px; left: 10px; top: 10px; }
++}
+diff --git a/web/shufflizer/index.html b/web/shufflizer/index.html
+index f96b8d6..e0d4ff4 100644
+--- a/web/shufflizer/index.html
++++ b/web/shufflizer/index.html
+@@ -5,6 +5,7 @@
+   <meta name="viewport" content="width=device-width,initial-scale=1" />
+   <title>Shufflizer</title>
+   <link rel="stylesheet" href="./css/style.css" />
++  <script>if (new URLSearchParams(location.search).has("embed")) document.documentElement.classList.add("embedded");</script>
+ </head>
+ <body>
+   <canvas id="c"></canvas>
+@@ -31,7 +32,7 @@
+   
+     src="http://192.168.68.57:8001/stream.mp3"
+   ></audio>
+-<div class="row">
++<div class="row audio-options">
+       <label><input id="muted" type="checkbox" checked /> Muted (visuals still live)</label>
+     </div>
+     <div class="row">
+diff --git a/web/shufflizer/js/main.js b/web/shufflizer/js/main.js
+index e7d5805..b630343 100644
+--- a/web/shufflizer/js/main.js
++++ b/web/shufflizer/js/main.js
+@@ -231,6 +231,7 @@ startNowPlaying({
+ 
+ // SHUFFLIZER_AUTOHIDE_UI
+ (function setupAutoHideUI() {
++  if (document.documentElement.classList.contains("embedded")) return;
+   const ui = document.getElementById("ui");
+   if (!ui) return;
+ 
