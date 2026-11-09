@@ -1,0 +1,15 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shuffle · Browser Player</title>
+<style>
+*{box-sizing:border-box}body{font:16px/1.5 system-ui;margin:auto;padding:24px;max-width:1200px;background:#10151c;color:#edf5f2}h1{margin-bottom:4px}.muted{color:#a7bcb7}section{background:#1c2730;padding:20px;border:1px solid #354a50;border-radius:14px;margin:20px 0}button,input{font:inherit;padding:9px;border-radius:6px}button{background:#b8f0d2;border:0;color:#12281e;cursor:pointer}button:disabled{opacity:.45;cursor:default}input{background:#10151c;border:1px solid #67857b;color:white}#q{flex:1;min-width:100px}form,.controls{display:flex;gap:10px;flex-wrap:wrap}.track{display:flex;gap:12px;align-items:center;border-top:1px solid #3a4b50;padding:12px 0}.meta{flex:1}.small{font-size:13px;color:#a7bcb7}iframe{display:block;width:100%;height:480px;border:0;border-radius:10px;background:#000}audio{width:100%;margin-top:16px}#status{color:#ffd095}#queue{padding-left:24px}#queue li{padding:8px}#queue button{margin-left:12px;padding:3px 10px}@media(max-width:600px){body{padding:12px}section{padding:14px}.track{flex-wrap:wrap}iframe{height:360px}}
+</style>
+<h1>Shuffle</h1><p class="muted">Synology browser player · local synthetic demo</p>
+<p>Read-only test index. Indexing disabled. Music and track information are generated fixtures.</p>
+<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album or track" placeholder="Artist, album or track"><button>Search</button></form>
+<div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
+<section><h2>Now playing</h2><strong id="title">Choose a track</strong><p id="album" class="small"></p>
+<div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>
+<audio id="player" controls preload="metadata"></audio><p id="status" role="status">Press Play beside a search result to start audible playback.</p>
+<div id="visualizer"></div></section>
+<section><h2>Queue</h2><p class="small">This browser's queue stays in memory. It never writes to the music index.</p><ol id="queue"></ol></section>
+<script src="/app.js"></script></html>

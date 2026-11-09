@@ -1,0 +1,617 @@
+diff --git a/.dockerignore b/.dockerignore
+index b924b1f..7d0e7f6 100644
+--- a/.dockerignore
++++ b/.dockerignore
+@@ -11,3 +11,8 @@
+ !preview/server.py
+ !preview/library_setup.py
+ !preview/setup.html
++!synology/
++!synology/fixtures.py
++!synology/server.py
++!synology/index.html
++!synology/app.js
+diff --git a/synology/Dockerfile.demo b/synology/Dockerfile.demo
+new file mode 100644
+index 0000000..60fe774
+--- /dev/null
++++ b/synology/Dockerfile.demo
+@@ -0,0 +1,12 @@
++FROM python:3.12-slim
++WORKDIR /app
++COPY synology/fixtures.py /app/fixtures.py
++RUN python -B fixtures.py
++COPY synology/server.py synology/index.html synology/app.js /app/
++COPY web/shufflizer/index.html /app/visualizer/index.html
++COPY web/shufflizer/css /app/visualizer/css
++COPY web/shufflizer/js /app/visualizer/js
++ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
++USER 65534:65534
++EXPOSE 8080
++CMD ["python", "-B", "server.py"]
+diff --git a/synology/README.md b/synology/README.md
+new file mode 100644
+index 0000000..9b311ac
+--- /dev/null
++++ b/synology/README.md
+@@ -0,0 +1,79 @@
++# Synology browser player — fixture-only first version
++
++This separate application searches an existing `tracks` table and plays its music
++in the PC browser. No Pi, MPV, systemd, NAS credentials, scanner, migration, or
++schema setup is used. The original application and scanner commits remain intact.
++
++The local demo image contains three newly generated 16-second WAV tracks and a
++fourth missing-track entry. Its SQLite database is created once at image build,
++closed, made read-only, and served from a read-only container filesystem. There
++are no host mounts. The queue exists only in each browser tab's memory.
++
++## Local demonstration
++
++Build `synology/Dockerfile.demo` with the repository root as context. Use an unused
++loopback port, for example `127.0.0.1:8094:8080`, and a distinct container name.
++Run with `--read-only --cap-drop=ALL --security-opt=no-new-privileges` and no mounts.
++The existing 8092 and 8093 containers need not be stopped or changed.
++
++At `/`, search for Copper, Orbit, Preview Synth, or Synthetic Sessions. Click Play
++to hear a pulsed test tone and feed the embedded Shufflizer. Add tracks to the
++queue, reorder playback by selecting a queue item, remove items, pause, seek, and
++change volume using the native player. Queue completion advances automatically.
++Missing entries stay visible but cannot be queued. No VU UI is added.
++
++Media uses same-origin HTTP with byte-range and HEAD support. Shufflizer uses the
++same browser audio element and analyser; it does not create another stream or
++fetch the Pi. Each browser has independent playback. Direct browser-supported
++formats are supported; this version does not transcode unsupported codecs.
++
++## Exact information required before real data can be connected
++
++The container paths are fixed:
++
++| Item | Required container path | Access |
++| --- | --- | --- |
++| Music folder | `/mnt/lossless` | Read-only |
++| Directory containing the separate backup | `/data` | Read-only |
++| Closed standalone SQLite backup | `/data/jukebox.db` | Read-only |
++
++**The NAS-side absolute paths have not been verified and must be supplied.**
++The SMB name `\\GreatATuin\Media\Media\LOSSLESS` does not establish which Synology
++volume hosts that share. Provide the DSM-local absolute path to that exact music
++directory, plus a dedicated absolute data-folder path for the separate backup.
++Do not substitute a guessed `/volume1/...` path.
++
++The backup must come from SQLite's consistent backup mechanism and be a separate
++file, never the original `/home/dan/jukebox.db`. No Pi or original database has
++been opened by this work. An authorized backup/export must be provided separately
++before real-library testing. Do not raw-copy an active database, ignore its WAL,
++or point the application at the original. Retain the delivered backup separately
++from any future writable index work.
++
++Before connecting that copy: validate its schema, confirm every track path is
++under `/mnt/lossless`, and confirm no active WAL/journal files accompany it.
++The app uses immutable read-only connections for this closed standalone copy.
++An incompatible, missing, or journal-bearing database blocks startup; it is never
++created, migrated, pruned, rebuilt, or vacuumed. Stored paths are not rewritten.
++SQLite rowid tables are required in this first version. Only bounded SELECT
++queries are executed after startup validation. Searching does not create indexes.
++
++For Synology: use Container Manager with its native local-folder bind mounts,
++both read-only, a non-root account with read/traverse ACL permissions, and a free
++LAN-facing port. No SMB mount or password is needed when the files are on the
++same NAS. Keep the service private to the trusted LAN; no authentication or
++internet exposure is provided in this first version. Do not mount the Docker
++socket or grant privileged mode. A real-data image without generated fixtures
++and its deployment configuration are deferred until the paths, backup and target
++CPU architecture are confirmed.
++
++## Verification
++
++`python -B -m unittest discover -s tests -v` checks typed search, SQL escaping,
++audio bytes, seeking, missing files, path restrictions, blocked indexing routes,
++and unchanged hashes of every test library/database file. Browser queue and
++rendering still require interactive checking; HTTP tests do not prove audible
++playback on the user's PC.
++
++`node tests/test_synology_queue.cjs` tests the queue's UI code using DOM/WebAudio
++test doubles: add, play, automatic next, previous, pause and missing-track state.
+diff --git a/synology/app.js b/synology/app.js
+new file mode 100644
+index 0000000..29127af
+--- /dev/null
++++ b/synology/app.js
+@@ -0,0 +1,78 @@
++const el = id => document.getElementById(id);
++const player = el('player');
++const context = new (window.AudioContext || window.webkitAudioContext)();
++const source = context.createMediaElementSource(player);
++const analyser = context.createAnalyser();
++analyser.fftSize = 1024;
++source.connect(analyser);
++analyser.connect(context.destination);
++window.playerAudio = {audioCtx: context, analyser, setMuted: value => { player.muted = value; }};
++window.currentTrackTitle = '';
++const frame = document.createElement('iframe');
++frame.src = '/visualizer/index.html?embed=1';
++frame.title = 'Shufflizer — reacts to browser playback';
++frame.allow = 'autoplay';
++el('visualizer').append(frame);
++let queue = [], position = -1, offset = 0, query = '', generation = 0;
++function button(label, action) { const b = document.createElement('button'); b.textContent = label; b.onclick = action; return b; }
++function renderQueue() {
++  el('queue').replaceChildren();
++  queue.forEach((track, index) => {
++    const li = document.createElement('li');
++    li.textContent = `${index === position ? '▶ ' : ''}${track.artist || 'Unknown artist'} — ${track.title || 'Untitled'}`;
++    li.append(button('Play', () => play(index)), button('Remove', () => {
++      if (index === position) { player.pause(); player.removeAttribute('src'); player.load(); position = -1; }
++      else if (index < position) position--;
++      queue.splice(index, 1); renderQueue();
++    }));
++    el('queue').append(li);
++  });
++}
++async function play(index) {
++  if (index < 0 || index >= queue.length) return;
++  position = index;
++  const track = queue[index];
++  player.src = '/media/' + track.id;
++  window.currentTrackTitle = `${track.artist || 'Unknown artist'} — ${track.title || 'Untitled'}`;
++  el('title').textContent = window.currentTrackTitle;
++  el('album').textContent = track.album || '';
++  renderQueue();
++  try { await context.resume(); player.muted = false; await player.play(); el('status').textContent = 'Playing in this browser. The visualizer uses the same audio.'; }
++  catch (error) { el('status').textContent = 'Playback unavailable. The file may be missing or its format unsupported by this browser. No index entries were changed.'; }
++}
++player.addEventListener('play', () => context.resume());
++player.addEventListener('ended', () => { if (position + 1 < queue.length) play(position + 1); else el('status').textContent = 'Queue finished.'; });
++player.addEventListener('error', () => { el('status').textContent = 'Track unavailable or unsupported by this browser. Choose another track; the index is unchanged.'; });
++el('prev').onclick = () => play(position - 1);
++el('next').onclick = () => play(position + 1);
++el('toggle').onclick = async () => {
++  if (!player.getAttribute('src')) return play(position < 0 ? 0 : position);
++  if (!player.paused) return player.pause();
++  try { await context.resume(); await player.play(); } catch { el('status').textContent = 'Unable to play this track.'; }
++};
++async function search(append = false) {
++  const mine = ++generation;
++  try {
++    const response = await fetch('/api/search?q=' + encodeURIComponent(query) + '&offset=' + offset);
++    if (!response.ok) throw Error();
++    const result = await response.json();
++    if (mine !== generation) return;
++    if (!append) el('results').replaceChildren();
++    for (const track of result.tracks) {
++      const row = document.createElement('div'); row.className = 'track';
++      const meta = document.createElement('div'); meta.className = 'meta';
++      const title = document.createElement('strong'); title.textContent = track.title || 'Untitled';
++      const detail = document.createElement('div'); detail.className = 'small';
++      detail.textContent = `${track.artist || 'Unknown artist'} · ${track.album || ''}${track.available ? '' : ' · File unavailable (index retained)'}`;
++      meta.append(title, detail); row.append(meta);
++      const start = button('Play', () => { queue.push(track); play(queue.length - 1); });
++      const add = button('Add to queue', () => { queue.push(track); renderQueue(); });
++      start.disabled = add.disabled = !track.available; row.append(start, add); el('results').append(row);
++    }
++    if (!append && !result.tracks.length) el('results').textContent = 'No matching tracks.';
++    el('more').hidden = !result.has_more;
++  } catch { if (mine === generation) el('results').textContent = 'Library unavailable. No scan or rebuild was started.'; }
++}
++el('search').onsubmit = event => { event.preventDefault(); query = el('q').value.trim(); offset = 0; search(); };
++el('more').onclick = () => { offset += 50; search(true); };
++search();
+diff --git a/synology/fixtures.py b/synology/fixtures.py
+new file mode 100644
+index 0000000..5ddfc2f
+--- /dev/null
++++ b/synology/fixtures.py
+@@ -0,0 +1,32 @@
++"""Generate NEW demo assets only, refusing existing destinations."""
++import math
++from pathlib import Path
++import sqlite3
++import struct
++import wave
++
++
++def generate(music, database):
++    music, database = Path(music), Path(database)
++    if music.exists() or database.exists():
++        raise RuntimeError("Fixture destinations must not exist")
++    music.mkdir(parents=True)
++    database.parent.mkdir(parents=True, exist_ok=True)
++    con = sqlite3.connect(database)
++    con.execute("CREATE TABLE tracks(path TEXT PRIMARY KEY,artist TEXT,album TEXT,title TEXT,duration REAL,year INTEGER)")
++    for number, (title, frequency) in enumerate((("Copper Pulse", 220), ("Night Orbit", 330), ("Signal Garden", 440)), 1):
++        path = music / (title + ".wav")
++        with wave.open(str(path), "wb") as wav:
++            wav.setparams((1, 2, 22050, 0, "NONE", "not compressed"))
++            wav.writeframes(b"".join(struct.pack("<h", int(9000 * math.sin(2 * math.pi * frequency * i / 22050)
++                * (0.2 + 0.8 * max(0, math.sin(2 * math.pi * 2 * i / 22050))))) for i in range(22050 * 16)))
++        con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/" + path.name,
++                    "Preview Synth", "Synthetic Sessions", title, 16, 2026))
++    con.execute("INSERT INTO tracks VALUES(?,?,?,?,?,?)", ("/mnt/lossless/Missing.wav", "Preview Synth", "Synthetic Sessions", "Missing Track", 16, 2026))
++    con.commit()
++    con.close()
++    database.chmod(0o444)
++
++
++if __name__ == "__main__":
++    generate("/mnt/lossless", "/data/jukebox.db")
+diff --git a/synology/index.html b/synology/index.html
+new file mode 100644
+index 0000000..a779da2
+--- /dev/null
++++ b/synology/index.html
+@@ -0,0 +1,15 @@
++<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
++<title>Shuffle · Browser Player</title>
++<style>
++*{box-sizing:border-box}body{font:16px/1.5 system-ui;margin:auto;padding:24px;max-width:1200px;background:#10151c;color:#edf5f2}h1{margin-bottom:4px}.muted{color:#a7bcb7}section{background:#1c2730;padding:20px;border:1px solid #354a50;border-radius:14px;margin:20px 0}button,input{font:inherit;padding:9px;border-radius:6px}button{background:#b8f0d2;border:0;color:#12281e;cursor:pointer}button:disabled{opacity:.45;cursor:default}input{background:#10151c;border:1px solid #67857b;color:white}#q{flex:1;min-width:100px}form,.controls{display:flex;gap:10px;flex-wrap:wrap}.track{display:flex;gap:12px;align-items:center;border-top:1px solid #3a4b50;padding:12px 0}.meta{flex:1}.small{font-size:13px;color:#a7bcb7}iframe{display:block;width:100%;height:480px;border:0;border-radius:10px;background:#000}audio{width:100%;margin-top:16px}#status{color:#ffd095}#queue{padding-left:24px}#queue li{padding:8px}#queue button{margin-left:12px;padding:3px 10px}@media(max-width:600px){body{padding:12px}section{padding:14px}.track{flex-wrap:wrap}iframe{height:360px}}
++</style>
++<h1>Shuffle</h1><p class="muted">Synology browser player · local synthetic demo</p>
++<p>Read-only test index. Indexing disabled. Music and track information are generated fixtures.</p>
++<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album or track" placeholder="Artist, album or track"><button>Search</button></form>
++<div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
++<section><h2>Now playing</h2><strong id="title">Choose a track</strong><p id="album" class="small"></p>
++<div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>
++<audio id="player" controls preload="metadata"></audio><p id="status" role="status">Press Play beside a search result to start audible playback.</p>
++<div id="visualizer"></div></section>
++<section><h2>Queue</h2><p class="small">This browser's queue stays in memory. It never writes to the music index.</p><ol id="queue"></ol></section>
++<script src="/app.js"></script></html>
+diff --git a/synology/server.py b/synology/server.py
+new file mode 100644
+index 0000000..24a8d82
+--- /dev/null
++++ b/synology/server.py
+@@ -0,0 +1,176 @@
++"""Read-only indexed library and browser media service. No indexing endpoints."""
++from contextlib import closing
++from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
++import json
++import mimetypes
++import os
++from pathlib import Path, PurePosixPath
++import re
++import sqlite3
++from urllib.parse import parse_qs, urlparse
++
++HERE = Path(__file__).resolve().parent
++
++
++class Library:
++    def __init__(self, database, music):
++        self.database, self.music = Path(database).resolve(), Path(music).resolve()
++        if not self.database.is_file() or not self.music.is_dir():
++            raise ValueError("Existing copied index and music mount required. Nothing will be created.")
++        if any(Path(str(self.database) + suffix).exists() for suffix in ("-wal", "-journal")):
++            raise ValueError("Use a consistent standalone SQLite backup without active journal files.")
++        with self.connect() as con:
++            columns = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
++            if not {"path", "artist", "album", "title"}.issubset(columns):
++                raise ValueError("Incompatible index; no migration is permitted.")
++            for row in con.execute("SELECT path FROM tracks"):
++                self.resolve(row[0])  # Validate every stored prefix without walking the music library.
++
++    def connect(self):
++        # Only a closed, consistent backup is supported. Immutable prevents sidecar writes.
++        return closing(sqlite3.connect(self.database.as_uri() + "?mode=ro&immutable=1", uri=True))
++
++    def resolve(self, stored):
++        path = PurePosixPath(stored)
++        if ".." in path.parts or not path.is_relative_to(PurePosixPath("/mnt/lossless")):
++            raise ValueError("Index paths must be under /mnt/lossless; mount there without rewriting the index.")
++        resolved = self.music.joinpath(*path.relative_to("/mnt/lossless").parts).resolve()
++        if not resolved.is_relative_to(self.music):
++            raise ValueError("Track escapes the music mount")
++        return resolved
++
++    def search(self, query="", offset=0):
++        # Escape LIKE metacharacters; values always use bound parameters.
++        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
++        pattern = "%" + escaped + "%"
++        with self.connect() as con:
++            con.row_factory = sqlite3.Row
++            rows = con.execute("SELECT rowid AS id,path,artist,album,title FROM tracks WHERE "
++                "artist LIKE ? ESCAPE '\\' OR album LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' "
++                "ORDER BY artist,album,title LIMIT 51 OFFSET ?", (pattern, pattern, pattern, offset)).fetchall()
++        return {"tracks": [{**{k: r[k] for k in ("id", "artist", "album", "title")},
++                            "available": self.resolve(r["path"]).is_file()} for r in rows[:50]],
++                "has_more": len(rows) > 50}
++
++    def track(self, ident):
++        with self.connect() as con:
++            row = con.execute("SELECT path FROM tracks WHERE rowid=?", (ident,)).fetchone()
++        return self.resolve(row[0]) if row else None
++
++
++class Handler(SimpleHTTPRequestHandler):
++    library = None
++    visuals = None
++
++    def end_headers(self):
++        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'")
++        self.send_header("X-Content-Type-Options", "nosniff")
++        self.send_header("Cache-Control", "no-store")
++        super().end_headers()
++
++    def content(self, data, kind):
++        if isinstance(data, str): data = data.encode()
++        self.send_response(200)
++        self.send_header("Content-Type", kind)
++        self.send_header("Content-Length", str(len(data)))
++        self.end_headers()
++        if self.command != "HEAD": self.wfile.write(data)
++
++    def do_POST(self):
++        self.send_error(405, "Indexing and system controls are disabled")
++
++    def do_HEAD(self):
++        self.do_GET()
++
++    def do_GET(self):
++        url = urlparse(self.path)
++        path = url.path
++        if path == "/api/search":
++            query = parse_qs(url.query)
++            try:
++                offset = int(query.get("offset", ["0"])[0])
++                if not 0 <= offset <= 1000000: raise ValueError()
++                result = self.library.search(query.get("q", [""])[0][:200], offset)
++            except (ValueError, sqlite3.Error, OSError):
++                return self.send_error(400, "Search unavailable")
++            return self.content(json.dumps(result), "application/json")
++        if path.startswith("/media/"):
++            return self.media(path)
++        if path in ("/", "/app.js"):
++            return self.content((HERE / ("index.html" if path == "/" else "app.js")).read_bytes(),
++                                "text/html; charset=utf-8" if path == "/" else "text/javascript")
++        if path == "/visualizer/index.html":
++            text = (self.visuals / "index.html").read_text().replace('src="/js/main.js"', 'src="/visualizer/js/main.js"')
++            text = re.sub(r'src="http[^\"]+"', '', text)
++            text = text.replace('</head>', '<style>#audio,.audio-options{display:none!important}</style></head>')
++            return self.content(text, "text/html; charset=utf-8")
++        if path == "/visualizer/js/main.js":
++            text = (self.visuals / "js/main.js").read_text()
++            text = text.replace('const audioEl = document.getElementById("audio");', 'const audioEl = window.parent.document.getElementById("player");')
++            start, end = text.index("// Use the page host"), text.index("const ui = initUI();")
++            text = text[:start] + text[end:]
++            text = text.replace('const audio = initAudio(audioEl, { startMuted: ui.state.muted });',
++                'ui.els.muted.checked = false; ui.state.muted = false; const audio = window.parent.playerAudio;')
++            # Parent owns playback and now-playing; no Pi or fixture polling.
++            start = text.index("startNowPlaying({")
++            end = text.index("// SHUFFLIZER_AUTOHIDE_UI", start)
++            text = text[:start] + 'setInterval(() => { ui.state.trackTitle = window.parent.currentTrackTitle || ""; }, 500);\n' + text[end:]
++            start = text.find("// --- Voice flash overlay")
++            if start >= 0: text = text[:start]
++            return self.content(text, "text/javascript")
++        if path.startswith("/visualizer/"):
++            asset = (self.visuals / path.removeprefix("/visualizer/")).resolve()
++            if asset.is_relative_to(self.visuals.resolve()) and asset.is_file() and asset.suffix in (".js", ".css"):
++                return self.content(asset.read_bytes(), "text/javascript" if asset.suffix == ".js" else "text/css")
++        return self.send_error(404)
++
++    def media(self, route):
++        try:
++            ident = int(route.removeprefix("/media/"))
++            if not 0 < ident < 2**63: raise ValueError()
++            path = self.library.track(ident)
++            if path is None: return self.send_error(404)
++            file = path.open("rb")
++        except (ValueError, OSError):
++            return self.send_error(404, "Track unavailable; index entry retained")
++        with file:
++            size = os.fstat(file.fileno()).st_size
++            start, end = 0, size - 1
++            header = self.headers.get("Range")
++            if header:
++                match = re.fullmatch(r"bytes=(\d*)-(\d*)", header)
++                if not match or not any(match.groups()): return self.bad_range(size)
++                a, b = match.groups()
++                if a:
++                    start, end = int(a), min(int(b), size - 1) if b else size - 1
++                else:
++                    start = max(0, size - int(b))
++                if start > end or start >= size: return self.bad_range(size)
++            self.send_response(206 if header else 200)
++            self.send_header("Content-Type", mimetypes.guess_type(path.name)[0] or "application/octet-stream")
++            self.send_header("Accept-Ranges", "bytes")
++            self.send_header("Content-Length", str(end - start + 1))
++            if header: self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
++            self.end_headers()
++            if self.command == "HEAD": return
++            file.seek(start)
++            remaining = end - start + 1
++            try:
++                while remaining:
++                    chunk = file.read(min(65536, remaining))
++                    if not chunk: break
++                    self.wfile.write(chunk)
++                    remaining -= len(chunk)
++            except (BrokenPipeError, ConnectionResetError): pass
++
++    def bad_range(self, size):
++        self.send_response(416)
++        self.send_header("Content-Range", f"bytes */{size}")
++        self.send_header("Content-Length", "0")
++        self.end_headers()
++
++
++if __name__ == "__main__":
++    Handler.library = Library(os.environ.get("JUKEBOX_DB_PATH", "/data/jukebox.db"), os.environ.get("JUKEBOX_MUSIC_ROOT", "/mnt/lossless"))
++    Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
++    ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
+diff --git a/tests/test_synology_player.py b/tests/test_synology_player.py
+new file mode 100644
+index 0000000..e65772b
+--- /dev/null
++++ b/tests/test_synology_player.py
+@@ -0,0 +1,111 @@
++import hashlib
++import http.client
++import importlib.util
++import io
++import json
++from pathlib import Path
++import tempfile
++import threading
++import unittest
++import wave
++
++PROJECT = Path(__file__).resolve().parents[1]
++
++
++def load(name, file):
++    spec = importlib.util.spec_from_file_location(name, PROJECT / "synology" / file)
++    module = importlib.util.module_from_spec(spec)
++    spec.loader.exec_module(module)
++    return module
++
++
++server = load("synology_server", "server.py")
++fixtures = load("synology_fixtures", "fixtures.py")
++
++
++class PlayerTests(unittest.TestCase):
++    def setUp(self):
++        self.temp = tempfile.TemporaryDirectory()
++        self.addCleanup(self.temp.cleanup)
++        root = Path(self.temp.name)
++        self.db, self.music = root / "data/jukebox.db", root / "music"
++        fixtures.generate(self.music, self.db)
++        self.before = self.snapshot()
++        self.library = server.Library(self.db, self.music)
++        handler = type("TestHandler", (server.Handler,), dict(
++            library=self.library, visuals=PROJECT / "web/shufflizer"))
++        self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
++        self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
++        self.thread.start()
++
++    def snapshot(self):
++        return {str(p): hashlib.sha256(p.read_bytes()).hexdigest()
++                for p in Path(self.temp.name).rglob("*") if p.is_file()}
++
++    def tearDown(self):
++        self.httpd.shutdown()
++        self.httpd.server_close()
++        self.thread.join()
++        self.assertEqual(self.before, self.snapshot(), "Player modified library or index")
++
++    def request(self, path, method="GET", headers=None):
++        client = http.client.HTTPConnection("127.0.0.1", self.httpd.server_port, timeout=5)
++        client.request(method, path, headers=headers or {})
++        response = client.getresponse()
++        data = response.read()
++        result = response.status, dict(response.getheaders()), data
++        client.close()
++        return result
++
++    def test_search_and_sql_values(self):
++        result = json.loads(self.request("/api/search?q=Copper")[2])
++        self.assertEqual(len(result["tracks"]), 1)
++        self.assertEqual(result["tracks"][0]["title"], "Copper Pulse")
++        self.assertTrue(result["tracks"][0]["available"])
++        self.assertEqual(self.library.search("%")['tracks'], [])
++        self.assertEqual(self.library.search("' OR 1=1 --")['tracks'], [])
++        self.assertEqual(self.request('/api/search?offset=-1')[0], 400)
++
++    def test_missing_track_retained_and_routes_disabled(self):
++        tracks = self.library.search()['tracks']
++        self.assertEqual(len(tracks), 4)
++        missing = next(t for t in tracks if not t['available'])
++        self.assertEqual(self.request('/media/' + str(missing['id']))[0], 404)
++        for route in ('/api/library/resync', '/api/system/reboot'):
++            self.assertEqual(self.request(route, 'POST')[0], 405)
++        self.assertEqual(len(self.library.search()['tracks']), 4)
++
++    def test_browser_audio_and_seek(self):
++        ident = self.library.search('Copper')['tracks'][0]['id']
++        route = '/media/' + str(ident)
++        status, headers, data = self.request(route)
++        self.assertEqual(status, 200)
++        with wave.open(io.BytesIO(data)) as wav:
++            self.assertEqual(wav.getnframes(), 22050 * 16)
++        status, headers, partial = self.request(route, headers={'Range': 'bytes=10-99'})
++        self.assertEqual(status, 206)
++        self.assertEqual(partial, data[10:100])
++        self.assertTrue(headers['Content-Range'].startswith('bytes 10-99/'))
++        self.assertEqual(self.request(route, headers={'Range': 'bytes=-16'})[2], data[-16:])
++        self.assertEqual(self.request(route, headers={'Range': 'bytes=99999999-'})[0], 416)
++        self.assertEqual(self.request(route, 'HEAD')[2], b'')
++
++    def test_visualizer_and_shared_audio(self):
++        self.assertIn(b'embedded', self.request('/visualizer/index.html?embed=1')[2])
++        script = self.request('/visualizer/js/main.js')[2].decode()
++        self.assertIn('window.parent.playerAudio', script)
++        self.assertIn('startEngine(canvas, audio.analyser, ui.state)', script)
++        self.assertNotIn('192.168.', script)
++        self.assertNotIn('voice_last.json', script)
++        for path in ('/', '/app.js', '/visualizer/js/engine.js', '/visualizer/css/style.css'):
++            self.assertEqual(self.request(path)[0], 200)
++
++    def test_path_escape_rejected(self):
++        for path in ('/etc/passwd', '/mnt/lossless/../secret.wav', '/mnt/lossless-other/test.wav'):
++            with self.assertRaises(ValueError):
++                self.library.resolve(path)
++        self.assertEqual(self.request('/media/99999999999999999999999')[0], 404)
++
++
++if __name__ == '__main__':
++    unittest.main()
+diff --git a/tests/test_synology_queue.cjs b/tests/test_synology_queue.cjs
+new file mode 100644
+index 0000000..7f6f152
+--- /dev/null
++++ b/tests/test_synology_queue.cjs
+@@ -0,0 +1,53 @@
++// Exercise the actual queue UI code with a lightweight DOM/WebAudio test double.
++const assert = require('node:assert/strict');
++const fs = require('node:fs');
++const vm = require('node:vm');
++class Element {
++  constructor() { this.children = []; this.listeners = {}; this.value = ''; this.paused = true; this.attributes = {}; }
++  append(...items) { this.children.push(...items); }
++  replaceChildren(...items) { this.children = items; }
++  addEventListener(event, callback) { this.listeners[event] = callback; }
++  set src(value) { this.attributes.src = value; }
++  get src() { return this.attributes.src; }
++  getAttribute(name) { return this.attributes[name]; }
++  removeAttribute(name) { delete this.attributes[name]; }
++  async play() { this.paused = false; if (this.listeners.play) await this.listeners.play(); }
++  pause() { this.paused = true; }
++  load() {}
++}
++const elements = Object.fromEntries(['player','title','album','status','visualizer','queue','prev','next','toggle','search','q','results','more'].map(id => [id,new Element()]));
++const tracks = [{id:1,title:'Copper Pulse',artist:'Preview Synth',album:'Tests',available:true},
++                {id:2,title:'Night Orbit',artist:'Preview Synth',album:'Tests',available:true},
++                {id:3,title:'Missing',available:false}];
++const node = () => ({connect() {}});
++const window = {AudioContext: class {
++  constructor() { this.destination = node(); }
++  createMediaElementSource() { return node(); }
++  createAnalyser() { return node(); }
++  async resume() {}
++}};
++const context = vm.createContext({window, document:{getElementById:id=>elements[id],createElement:()=>new Element()},
++  fetch:async()=>({ok:true,json:async()=>({tracks,has_more:false})}),console});
++vm.runInContext(fs.readFileSync('synology/app.js','utf8'), context);
++const flush = () => new Promise(resolve => setImmediate(resolve));
++(async () => {
++  await flush();
++  assert.equal(elements.results.children.length,3);
++  assert.equal(elements.results.children[2].children[1].disabled,true);
++  elements.results.children[0].children[2].onclick(); // Add Copper.
++  elements.results.children[1].children[2].onclick(); // Add Orbit.
++  assert.equal(elements.queue.children.length,2);
++  await elements.toggle.onclick();
++  assert.equal(elements.player.src,'/media/1');
++  assert.equal(elements.player.paused,false);
++  assert.equal(window.currentTrackTitle,'Preview Synth — Copper Pulse');
++  elements.player.listeners.ended(); await flush();
++  assert.equal(elements.player.src,'/media/2');
++  await elements.prev.onclick();
++  assert.equal(elements.player.src,'/media/1');
++  await elements.toggle.onclick();
++  assert.equal(elements.player.paused,true);
++  assert.ok(window.playerAudio.analyser);
++  assert.equal(elements.visualizer.children[0].src,'/visualizer/index.html?embed=1');
++  console.log('Queue UI tests passed: add, play, automatic next, previous, pause, unavailable track, shared analyser.');
++})().catch(error => { console.error(error);process.exitCode=1; });

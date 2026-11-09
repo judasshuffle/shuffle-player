@@ -11,3 +11,8 @@
 !preview/server.py
 !preview/library_setup.py
 !preview/setup.html
+!synology/
+!synology/fixtures.py
+!synology/server.py
+!synology/index.html
+!synology/app.js

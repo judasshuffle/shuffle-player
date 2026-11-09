@@ -1,0 +1,12 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY synology/fixtures.py /app/fixtures.py
+RUN python -B fixtures.py
+COPY synology/server.py synology/index.html synology/app.js /app/
+COPY web/shufflizer/index.html /app/visualizer/index.html
+COPY web/shufflizer/css /app/visualizer/css
+COPY web/shufflizer/js /app/visualizer/js
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
+USER 65534:65534
+EXPOSE 8080
+CMD ["python", "-B", "server.py"]
