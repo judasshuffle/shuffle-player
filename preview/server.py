@@ -2,6 +2,7 @@
 import io
 import json
 import math
+import os
 from pathlib import Path
 import sqlite3
 import struct
@@ -16,6 +17,7 @@ from library_setup import SetupDemo
 
 setup_demo = None
 setup_lock = threading.Lock()
+setup_home = os.environ.get("PREVIEW_SETUP_HOME") == "1"
 
 def forbidden(*args, **kwargs):
     raise RuntimeError("Production interfaces are disabled in this preview")
@@ -77,8 +79,11 @@ class PreviewHandler(dashboard.Handler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        if path == "/setup":
-            return self.content(Path(__file__).with_name("setup.html").read_text(encoding="utf-8"),
+        if path == "/setup" or (setup_home and path == "/"):
+            html = Path(__file__).with_name("setup.html").read_text(encoding="utf-8")
+            if setup_home:
+                html = html.replace('href="/"', 'href="/dashboard"')
+            return self.content(html,
                                 "text/html; charset=utf-8")
         if path in ("/api/nowplaying", "/nowplaying.json"):
             return self._json(nowplaying())
@@ -113,7 +118,7 @@ class PreviewHandler(dashboard.Handler):
             return self.mock_control(path)
         if path.startswith("/api/"):
             return self.send_error(404)
-        if path in ("/", "/control"):
+        if path in ("/", "/control", "/dashboard"):
             description = "Audio and library information are synthetic. The tone pulses twice per second, with a quiet gap every four seconds."
             html = dashboard.DASHBOARD_HTML.replace('<h1>Shuffle Control</h1>',
                 '<h1>Shuffle Control Â· Local Preview</h1><p>All controls are simulated. '
