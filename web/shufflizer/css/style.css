@@ -116,7 +116,7 @@ body.ui-hidden #ui {
   box-shadow: 0 12px 32px rgba(0,0,0,.3);
 }
 .embedded #ui > :not(.row):not(audio):not(#paletteRow),
-.embedded #ui > .row:not(:nth-child(1)):not(:nth-child(2)) { display: none !important; }
+.embedded #ui > .row:not(:nth-child(1)):not(:nth-child(2)):not(.audio-options) { display: none !important; }
 .embedded #ui .row { grid-template-columns: 68px minmax(0,1fr); }
 .embedded #ui select { width: 100%; min-width: 0; }
 .embedded #ui audio#audio { margin-top: 12px; height: 36px; }
