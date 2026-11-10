@@ -1,4 +1,112 @@
-# Synology browser player — fixture-only first version
+# Synology browser player
+
+The working deployed version and future recovery procedure are recorded in
+[CHECKPOINT-RESTORE.md](CHECKPOINT-RESTORE.md). SQLite and music are separate
+from the GitHub application-code backup.
+
+## Live NAS deployment — 10 November 2026
+
+Shufflizer's Bank, Preset, and Palette controls now sit in their own panel between
+Find your music and Search results. The iframe contains the display only.
+The Synology UI adapter reads controls from the parent document while keeping
+renderer state, palette preferences, custom colours, and shared browser audio
+inside the existing Shufflizer runtime. The Pi visualizer sources are unchanged.
+
+Remote listening addresses and the routing cutover are documented in
+[REMOTE-LISTENING.md](REMOTE-LISTENING.md). The exact legacy MP3 URL remains
+`http://shuffle.tplinkdns.com:8001/stream.mp3`. Synology also serves a shared,
+on-demand MP3 radio at that path, plus the same player and per-track original/MP3
+audio through NAS port 8001. The existing LAN port 8094 is retained. Public
+router forwarding is a separate, unverified cutover; no DNS or router rule has
+been changed by this deployment.
+
+Playback quality defaults to **Lossless / original**: the original file bytes are
+served directly, with no lossless-format conversion. The browser checks each
+track's MIME type with `canPlayType` and suggests **MP3 compatibility** when
+native support is not reported. Ogg FLAC is not introduced. Original lossy files
+retain their original quality; selecting this mode cannot make them lossless.
+The selector saves `shuffle.playback.quality` in browser local storage. Switching
+keeps the queue, current track, pause/mute state, and restores playback time after
+the replacement source's metadata loads. Rapid changes cancel stale playback.
+
+MP3 is encoded on demand by the NAS container (256 kbps, stereo, 44.1 kHz).
+The first request waits for conversion so the complete MP3 supports byte ranges
+and seeking. Only disposable outputs are cached in `/cache`, a separate 512 MiB
+RAM filesystem; completed outputs are limited to 256 MiB. One encoder runs at a
+time, with a 180-second timeout. The cache is not in the music mount, `/data`, Git,
+or the image and disappears with the container. No Pi service is contacted.
+The application root, music, and database remain read-only.
+
+`node tests/test_synology_quality.cjs` covers defaults, persistence, quality
+switches, playback position, pause/mute state, rapid changes, and failure recovery.
+The Python tests exercise real MP3 encoding, seeking/range reuse, unavailable
+encoders, and unchanged source/index hashes. The demo image also includes FFmpeg;
+MP3 mode requires a writable `/cache` tmpfs (the real Compose project supplies it).
+
+The compact listening area comes first: album art alongside Shufflizer, followed
+by transport/audio controls. Search and Shuffle All sit immediately below it;
+search tips and musical styles expand on demand. Results and the playlist are
+lower on the page so a long queue cannot push the listening area out of reach.
+
+Musical styles: the browser lists 53 broad style families plus subgenres from
+the existing index (133 choices in the supplied backup). Counts describe indexed
+tags and can overlap. Unsupported/empty families are disabled; 1,777 untagged
+tracks remain accessible through normal search and Shuffle All. Commands include
+`play blues`, `queue genre disco`, `play 70s genre jazz`, and `genre: bossa nova`.
+`play artist Pop` forces artist matching when a name overlaps a style.
+Genre families include aliases and related subgenres; raw tags are never changed.
+This reads SQLite genre values only, with no audio scanning or index rebuild.
+
+The visualizer Palette menu now initialises after preset state is available.
+Preset and Custom colours update the visualizer and the whole player theme,
+including panels, buttons, text, borders, and inputs. Preferences restore from
+browser local storage, including custom RGB/RGBA values. The shared Pi visualizer
+sources are unchanged; Synology serves its own palette bootstrap and adaptations.
+`node tests/test_synology_palette.cjs` exercises the actual selector, renderer
+globals, frame-to-player theme changes, and saved Custom palette restoration.
+
+Play matches replaces the browser queue and starts its first match. Per-track
+Play also replaces the queue; Queue matches and Add to queue append.
+Decades accept `80's`, `80s`, `1980s`, and curly apostrophes.
+Current-track artwork reads embedded FLAC/ID3/MP4/Vorbis pictures first, then
+checks conventional cover/folder/front JPEG, PNG, or WebP names beside that track.
+Missing artwork displays a placeholder. Artwork is requested on demand, with no
+disk cache, folder enumeration, or index changes. Mutagen 1.47.0 reads metadata
+through files opened in binary read-only mode.
+
+LAN URL: http://192.168.68.81:8094. Separate Compose project `shuffle-player`,
+deployed in `/volume1/docker/shuffle-player` on GreatATuin (x86-64).
+`compose.yaml` is copied to that directory with the application build context.
+The SMB configuration confirms `docker` maps to `/volume1/docker`.
+
+The real deployment uses `synology/Dockerfile`, without generated fixtures.
+It runs as `1026:100`, with a read-only root filesystem, dropped capabilities,
+and no-new-privileges. Only the NAS LAN address binds port 8094.
+Music is bound read-only from `/volume1/Media/Media/LOSSLESS` to `/mnt/lossless`.
+The dedicated data directory is bound read-only to `/data`.
+No credentials are needed in the image or repository.
+
+The supplied standalone backup was copied without overwriting an existing file.
+Its SHA-256 on Windows and inside the container is
+`4de36d001b655efe282136ab9c7491ab7920d9034a4807b1afcde9769a152c3b`.
+Read-only SQL confirms 17,623 tracks. LAN Shuffle All pagination returns all
+17,623 entries, of which 17,621 files are available; unavailable entries remain
+in the index. `play 70s Bob Dylan` returns 49 available matches.
+Full Hurricane FLAC delivery matches the NAS source SHA-256:
+`73213176644d35c839a23711708cdf22816679f78af0a4d2148e399e6d837762`.
+Byte ranges, HEAD, Shufflizer assets, and a 15-second FFmpeg decode pass.
+Terminal checks verify delivery and decoding, not audible browser playback.
+
+`python -B synology/verify_lan.py` repeats read-only LAN delivery checks.
+`synology/verify_container.py` can be piped to Python in the running container
+to compare the database and source audio hashes without changing them.
+The original Pi, original database, music, and other containers were untouched.
+
+The following sections document the original fixture demo and its pre-deployment
+requirements; the verified paths and live deployment above supersede the earlier
+unknown-path and deferred-deployment statements.
+
+## Original fixture demonstration
 
 This separate application searches an existing `tracks` table and plays its music
 in the PC browser. No Pi, MPV, systemd, NAS credentials, scanner, migration, or

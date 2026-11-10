@@ -16,3 +16,5 @@
 !synology/server.py
 !synology/index.html
 !synology/app.js
+!synology/palette.js
+!synology/radio.py

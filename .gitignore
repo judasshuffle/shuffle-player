@@ -33,3 +33,37 @@ web/shufflizer.brokeish_*
 web/shufflizer/*_snapshot_*/
 web/shufflizer/backups_palette_*/
 web/shufflizer/api/
+
+# Local secrets and deployment-only state
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+synology/secrets/
+synology/data/
+synology/cache/
+/data/
+/cache/
+
+# Library files, SQLite copies/sidecars, and generated runtime output
+*.sqlite
+*.sqlite3
+*.db-journal
+*.flac
+*.mp3
+*.ogg
+*.opus
+*.wav
+*.m4a
+*.aac
+*.aiff
+*.aif
+*.alac
+*.ape
+*.wv
+*.log
+*.tmp
+.pytest_cache/

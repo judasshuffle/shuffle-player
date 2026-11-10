@@ -2,16 +2,30 @@
 <title>Shuffle · Browser Player</title>
 <style>
 *{box-sizing:border-box}body{font:16px/1.5 system-ui;margin:auto;padding:24px;max-width:1200px;background:#10151c;color:#edf5f2}h1{margin-bottom:4px}.muted{color:#a7bcb7}section{background:#1c2730;padding:20px;border:1px solid #354a50;border-radius:14px;margin:20px 0}button,input{font:inherit;padding:9px;border-radius:6px}button{background:#b8f0d2;border:0;color:#12281e;cursor:pointer}button:disabled{opacity:.45;cursor:default}input{background:#10151c;border:1px solid #67857b;color:white}#q{flex:1;min-width:100px}form,.controls{display:flex;gap:10px;flex-wrap:wrap}.track{display:flex;gap:12px;align-items:center;border-top:1px solid #3a4b50;padding:12px 0}.meta{flex:1}.small{font-size:13px;color:#a7bcb7}iframe{display:block;width:100%;height:480px;border:0;border-radius:10px;background:#000}audio{width:100%;margin-top:16px}#status{color:#ffd095}#queue{padding-left:24px}#queue li{padding:8px}#queue button{margin-left:12px;padding:3px 10px}@media(max-width:600px){body{padding:12px}section{padding:14px}.track{flex-wrap:wrap}iframe{height:360px}}
+
+/* Keep listening controls together above the scrollable playlist. */
+body{padding:16px 24px}header{display:flex;align-items:baseline;gap:16px}header h1{margin:0;font-size:28px}header p{margin:0}section{padding:18px;margin:14px 0}h2{font-size:18px;margin:0 0 12px}
+.now-grid{display:grid;grid-template-columns:190px minmax(0,1fr);gap:18px;align-items:stretch}.track-info{min-width:0}#artwork{width:100%;height:190px;margin:0!important}#title{display:block;margin-top:10px;font-size:15px;overflow-wrap:anywhere}#album{margin:2px 0 0}#visualizer{min-width:0}iframe{height:100%;min-height:260px}.transport{display:grid;grid-template-columns:auto minmax(200px,1fr);align-items:center;gap:16px;margin-top:14px}audio{display:block;height:40px;margin:0}#status{font-size:13px;margin:8px 0 0}.find-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.find-heading h2{margin:0}#shuffleAll{font-weight:700;padding:10px 20px}details{margin-top:12px}summary{cursor:pointer;font-size:14px}#interpretation{font-size:14px;margin:10px 0}
+@media(max-width:700px){body{padding:12px}header{gap:10px}header p{font-size:12px}section{padding:14px}.now-grid{grid-template-columns:120px minmax(0,1fr);gap:12px}#artwork{height:120px}iframe{height:100%;min-height:245px}.transport{grid-template-columns:1fr;gap:10px}.controls button{padding:8px}#shuffleAll{padding:9px 14px}}
+@media(max-width:420px){.now-grid{grid-template-columns:90px minmax(0,1fr);gap:10px}#artwork{height:90px}#title{font-size:13px}}
+#visualizerControls #ui{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;align-items:start}#visualizerControls #ui>.row{display:none}#visualizerControls #ui>.row:nth-child(-n+2){display:grid;grid-template-columns:64px minmax(0,1fr);gap:8px;align-items:center}#visualizerControls #ui>hr{display:none}#visualizerControls select{font:inherit;padding:7px;border-radius:6px;width:100%;min-width:0}#visualizerControls #paletteRow{margin-top:0!important;align-items:center}#visualizerControls #paletteSelect{max-width:none!important;flex:1}#visualizerControls #shufCustomPalettePanel{max-width:100%}
 </style>
-<h1>Shuffle</h1><p class="muted">Synology browser player · local synthetic demo</p>
-<p>Read-only test index. Indexing disabled. Music and track information are generated fixtures.</p>
-<section><h2>Find your music</h2><form id="search"><input id="q" aria-label="Artist, album, track or typed command" placeholder="Artist, album, track, or play 70s Bob Dylan"><button>Search / interpret</button></form>
-<p class="small">Try <code>play 70s Bob Dylan</code>: artist matches from 1970–1979. Commands never start playback automatically. Two-digit decades 00s–20s mean 2000–2029; 30s–90s mean 1930–1999. Use four digits to avoid ambiguity.</p>
-<p id="interpretation" role="status"></p><div class="controls"><button id="playMatches" disabled>Play matches</button><button id="queueMatches" disabled>Queue matches</button><button id="shuffleAll">Shuffle All</button></div>
-<div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
-<section><h2>Now playing</h2><strong id="title">Choose a track</strong><p id="album" class="small"></p>
-<div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>
-<audio id="player" controls preload="metadata"></audio><p id="status" role="status">Press Play beside a search result to start audible playback.</p>
-<div id="visualizer"></div></section>
-<section><h2>Queue</h2><p class="small">This browser's queue stays in memory. It never writes to the music index.</p><ol id="queue"></ol></section>
-<script src="/app.js"></script></html>
+<header><h1>Shuffle</h1><p class="muted">Synology browser player</p></header>
+<section id="nowPlaying" aria-label="Now playing"><div class="now-grid"><div class="track-info"><img id="artwork" src="/artwork/fallback.svg" alt="No album artwork" width="240" height="240" style="object-fit:contain;display:block;max-width:100%;border-radius:10px;margin-bottom:16px"><strong id="title">Choose a track</strong><p id="album" class="small"></p>
+</div><div id="visualizer"></div></div><div class="transport"><div class="controls"><button id="prev">Previous</button><button id="toggle">Play / Pause</button><button id="next">Next</button></div>
+<audio id="player" controls preload="metadata"></audio></div>
+<div class="controls" style="margin-top:10px"><label for="quality">Playback quality</label><select id="quality" aria-describedby="qualityInfo" style="font:inherit;padding:7px;border-radius:6px"><option value="original">Lossless / original</option><option value="mp3">MP3 compatibility</option></select><span id="qualityInfo" class="small">Original audio, with no conversion.</span></div>
+<p id="status" role="status">Press Play beside a search result to start audible playback.</p>
+<p class="small"><a id="originalLink" hidden target="_blank" rel="noopener">Open current original audio</a> <a id="mp3Link" hidden target="_blank" rel="noopener">Open current MP3 audio</a></p>
+</section>
+<section id="findMusic"><div class="find-heading"><h2>Find your music</h2><button id="shuffleAll">Shuffle All</button></div><form id="search"><input id="q" aria-label="Artist, album, track or typed command" placeholder="Artist, album, track, or play 70s Bob Dylan"><button>Search / interpret</button></form>
+
+<details><summary>Musical styles and search tips</summary><p class="small">Try <code>play 70s Bob Dylan</code>: artist matches from 1970–1979. Commands never start playback automatically. Two-digit decades 00s–20s mean 2000–2029; 30s–90s mean 1930–1999. Use four digits to avoid ambiguity.</p><p class="small">Choose a broad style or one of your library’s subgenres, then Play matches or Queue matches. Try <code>play blues</code>, <code>play genre disco</code>, or <code>play 70s genre jazz</code>. Use <code>play artist Pop</code> to search an artist whose name is also a style.</p>
+<label for="styleSelect">Musical style</label> <select id="styleSelect" style="font:inherit;padding:9px;max-width:100%"><option value="">Choose a style…</option></select><p id="styleInfo" class="small" role="status"></p></details>
+<details><summary>Remote listening</summary><p><a href="http://shuffle.tplinkdns.com:8001/" target="_blank" rel="noopener">Remote player: lossless or MP3</a> · <a href="http://shuffle.tplinkdns.com:8001/stream.mp3" target="_blank" rel="noopener">MP3 radio stream</a></p><p class="small">The radio stream is a shared Shuffle All mix, independent of this browser’s queue. Current-track links above open individual original or MP3 audio files.</p></details>
+<p id="interpretation" role="status"></p><div class="controls"><button id="playMatches" disabled>Play matches</button><button id="queueMatches" disabled>Queue matches</button></div>
+</section>
+<section id="visualizerControls"><h2>Shufflizer controls</h2><!-- SHUFFLIZER_CONTROLS --></section>
+<section id="searchResults"><h2>Search results</h2><div id="results" aria-live="polite"></div><button id="more" hidden>Load more</button></section>
+<section id="playlist"><h2>Playlist</h2><p class="small">This browser's queue stays in memory. It never writes to the music index.</p><ol id="queue"></ol></section>
+<script src="/palette.js"></script><script src="/app.js"></script></html>

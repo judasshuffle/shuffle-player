@@ -1,0 +1,38 @@
+name: shuffle-player
+services:
+  player:
+    image: shuffle-player:synology-be65178
+    build:
+      context: .
+      dockerfile: synology/Dockerfile
+    user: "1026:100"
+    ports:
+      - "192.168.68.81:8094:8080"
+      - "192.168.68.81:8001:8080"
+    environment:
+      PUBLIC_LISTENING_BASE: http://shuffle.tplinkdns.com:8001
+    volumes:
+      - type: bind
+        source: /volume1/docker/shuffle-player/data
+        target: /data
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/Media/Media/LOSSLESS
+        target: /mnt/lossless
+        read_only: true
+        bind:
+          create_host_path: false
+    read_only: true
+    tmpfs:
+      - /cache:rw,noexec,nosuid,size=512m,uid=1026,gid=100,mode=0700
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+    healthcheck:
+      test: [CMD, python, -B, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/search?q=Bob%20Dylan', timeout=15).read()"]
+      interval: 60s
+      timeout: 20s
+      start_period: 120s
+      retries: 3
