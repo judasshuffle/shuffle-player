@@ -7,7 +7,7 @@ services:
       dockerfile: synology/Dockerfile
     user: "1026:100"
     ports:
-      - "192.168.68.81:8094:8080"
+      - "192.168.68.81:8094:8081"
       - "192.168.68.81:8001:8080"
     environment:
       PUBLIC_LISTENING_BASE: http://shuffle.tplinkdns.com:8001

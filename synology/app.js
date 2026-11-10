@@ -14,6 +14,7 @@ frame.title = 'Shufflizer — reacts to browser playback';
 frame.allow = 'autoplay';
 el('visualizer').append(frame);
 let queue = [], position = -1, offset = 0, query = '', generation = 0;
+let stationController = null;
 let actionVersion = 0;
 let playbackVersion = 0, pendingPlayback = null, cancelPendingPlayback = null, failedPlayback = null;
 let quality = 'original';
@@ -90,6 +91,7 @@ async function loadTrack(track, resumeAt = 0, autoplay = true) {
 el('quality').onchange = () => {
   quality = el('quality').value === 'mp3' ? 'mp3' : 'original';
   try { localStorage.setItem('shuffle.playback.quality', quality); } catch {}
+  if (stationController) return stationController.monitor(true);
   qualityInfo(position >= 0 ? queue[position] : null);
   if (position < 0 || !queue[position]) return;
   const restore = pendingPlayback || (failedPlayback?.trackId === queue[position].id ? failedPlayback : null);
@@ -115,6 +117,7 @@ function renderQueue() {
   });
 }
 async function play(index) {
+  if (stationController) return stationController.command('select', {index});
   if (index < 0 || index >= queue.length) return;
   position = index;
   const track = queue[index];
@@ -131,7 +134,7 @@ async function play(index) {
   await loadTrack(track);
 }
 player.addEventListener('play', () => context.resume());
-player.addEventListener('ended', () => { if (pendingPlayback) return; if (position + 1 < queue.length) play(position + 1); else el('status').textContent = 'Queue finished.'; });
+player.addEventListener('ended', () => { if (stationController || pendingPlayback) return; if (position + 1 < queue.length) play(position + 1); else el('status').textContent = 'Queue finished.'; });
 player.addEventListener('error', () => { el('status').textContent = 'Playback unavailable. Try the other playback quality; your queue is preserved.'; });
 el('prev').onclick = () => play(position - 1);
 el('next').onclick = () => play(position + 1);
@@ -162,8 +165,8 @@ async function search(append = false) {
       const detail = document.createElement('div'); detail.className = 'small';
       detail.textContent = `${track.artist || 'Unknown artist'} · ${track.album || ''}${track.available ? '' : ' · File unavailable (index retained)'}`;
       meta.append(title, detail); row.append(meta);
-      const start = button('Play', () => { actionVersion++; queue = [track]; play(0); });
-      const add = button('Add to queue', () => { queue.push(track); renderQueue(); });
+      const start = button('Play', () => { actionVersion++; if (stationController) return stationController.command('replace', {ids:[track.id]}); queue = [track]; play(0); });
+      const add = button('Add to queue', () => { if (stationController) return stationController.command('append', {ids:[track.id]}); queue.push(track); renderQueue(); });
       start.disabled = add.disabled = !track.available; row.append(start, add); el('results').append(row);
     }
     if (!append && !result.tracks.length) el('results').textContent = 'No matching tracks.';
@@ -198,6 +201,7 @@ async function useMatches(start, shuffle = false) {
     const matches = await collectMatches(shuffle);
     if (!matches) return;
     if (!matches.length) { el('status').textContent = 'No available indexed tracks match. Queue unchanged.'; return; }
+    if (stationController) return await stationController.command(start ? 'replace' : 'append', {ids:matches.map(track => track.id), repeat:shuffle});
     if (start) {
       queue = matches; position = -1; renderQueue(); await play(0);
     } else {

@@ -9,6 +9,7 @@ import threading
 import unittest
 import wave
 import shutil
+import time
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -72,6 +73,63 @@ class PlayerTests(unittest.TestCase):
         self.assertEqual(self.library.search("%")['tracks'], [])
         self.assertEqual(self.library.search("' OR 1=1 --")['tracks'], [])
         self.assertEqual(self.request('/api/search?offset=-1')[0], 400)
+
+    def test_shared_station_queue_clock_and_lan_authorization(self):
+        handler = self.httpd.RequestHandlerClass
+        radio = handler.radio
+        state = radio.control('replace', {'ids':[1,2]})
+        self.assertEqual(state['current']['id'], 1)
+        self.assertEqual(state['queue_count'], 2)
+        time.sleep(.08)
+        self.assertGreater(radio.snapshot()['position'], state['position'])
+        paused = radio.control('toggle', {})
+        time.sleep(.08)
+        self.assertAlmostEqual(radio.snapshot()['position'], paused['position'], places=3)
+        radio.control('append', {'ids':[3]})
+        self.assertFalse(radio.snapshot()['playing'])
+        self.assertEqual(radio.snapshot()['queue_count'], 3)
+        radio.control('seek', {'position':3})
+        self.assertEqual(radio.snapshot()['position'], 3)
+        self.assertEqual(radio.control('next', {})['current']['id'], 2)
+        self.assertEqual(radio.control('remove', {'index':0})['current']['id'], 2)
+        with self.assertRaises(ValueError): radio.control('replace', {'ids':[999999]})
+        self.assertEqual(radio.snapshot()['current']['id'], 2)
+
+        def post(token='', origin=None):
+            client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=5)
+            headers = {'Content-Type':'application/json', 'X-Shuffle-Control':token}
+            if origin: headers['Origin'] = origin
+            client.request('POST', '/api/station/control', json.dumps({'action':'replace','ids':[1,3]}), headers)
+            response = client.getresponse(); data = response.read(); client.close()
+            return response.status, data
+        self.assertNotIn('control_token', json.loads(self.request('/api/station')[2]))
+        self.assertEqual(post(handler.control_token)[0], 403, 'Public listener port cannot control even with a token')
+        handler.control_access = True
+        try:
+            token = json.loads(self.request('/api/station')[2])['control_token']
+            self.assertEqual(post()[0], 403)
+            self.assertEqual(post(token, 'http://hostile.example')[0], 403)
+            status, data = post(token)
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(data)['current']['id'], 1)
+        finally: handler.control_access = False
+
+    @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
+    def test_station_controls_keep_existing_stream_connection(self):
+        radio = self.httpd.RequestHandlerClass.radio
+        radio.control('replace', {'ids':[1,2]})
+        client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=10)
+        client.request('GET', '/stream.mp3')
+        response = client.getresponse()
+        try:
+            self.assertEqual(len(response.read(4096)), 4096)
+            radio.control('toggle', {})
+            self.assertFalse(radio.snapshot()['playing'])
+            self.assertEqual(len(response.read(4096)), 4096, 'Pause emits silence without closing Webamp stream')
+            radio.control('next', {})
+            self.assertEqual(radio.snapshot()['current']['id'], 2)
+            self.assertEqual(len(response.read(8192)), 8192, 'Skip keeps the same HTTP stream alive')
+        finally: client.close()
 
     def test_missing_track_retained_and_routes_disabled(self):
         tracks = self.library.search()['tracks']
@@ -223,6 +281,26 @@ class PlayerTests(unittest.TestCase):
         self.httpd.RequestHandlerClass.radio.listener_limit = 0
         self.assertEqual(self.request('/stream.mp3')[0], 503)
 
+    def test_webamp_cross_origin_radio_and_preflight(self):
+        for origin in ('null', 'https://darkride.example'):
+            status, headers, data = self.request('/stream.mp3?diagnostic=cors', 'HEAD', {'Origin':origin})
+            self.assertEqual((status, headers['Content-Type'], data), (200, 'audio/mpeg', b''))
+            self.assertEqual(headers.get('Access-Control-Allow-Origin'), '*')
+            self.assertNotIn('Access-Control-Allow-Credentials', headers)
+            status, headers, data = self.request('/stream.mp3', 'OPTIONS', {
+                'Origin':origin, 'Access-Control-Request-Method':'GET',
+                'Access-Control-Request-Headers':'icy-metadata, range'})
+            self.assertEqual((status, data), (204, b''))
+            self.assertEqual(headers['Access-Control-Allow-Origin'], '*')
+            self.assertIn('GET', headers['Access-Control-Allow-Methods'])
+            self.assertIn('Icy-MetaData', headers['Access-Control-Allow-Headers'])
+            self.assertIn('Range', headers['Access-Control-Allow-Headers'])
+        self.assertIsNone(self.httpd.RequestHandlerClass.radio.thread)
+        self.assertNotIn('Access-Control-Allow-Origin', self.request('/')[1])
+        self.assertEqual(self.request('/api/search', 'OPTIONS')[0], 405)
+        self.httpd.RequestHandlerClass.radio.listener_limit = 0
+        self.assertEqual(self.request('/stream.mp3', headers={'Origin':'null'})[1]['Access-Control-Allow-Origin'], '*')
+
     @unittest.skipUnless(shutil.which('ffmpeg'), 'FFmpeg required for live radio checks')
     def test_shared_radio_continues_across_tracks_and_joins_midstream(self):
         import sqlite3
@@ -245,9 +323,10 @@ class PlayerTests(unittest.TestCase):
         first = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=10)
         second = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=10)
         try:
-            first.request('GET', '/stream.mp3')
+            first.request('GET', '/stream.mp3', headers={'Origin':'null'})
             live = first.getresponse()
             self.assertEqual(live.status, 200)
+            self.assertEqual(live.getheader('Access-Control-Allow-Origin'), '*')
             self.assertTrue(live.read(4096))
             second.request('GET', '/stream.mp3')
             joined = second.getresponse()

@@ -18,3 +18,5 @@
 !synology/app.js
 !synology/palette.js
 !synology/radio.py
+
+!synology/station.js

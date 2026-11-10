@@ -14,6 +14,7 @@ import threading
 from collections import OrderedDict
 from urllib.parse import parse_qs, urlparse
 import queue
+import secrets
 
 # Minimal container images may lack the OS MIME database.
 for extension, kind in {'.flac': 'audio/flac', '.mp3': 'audio/mpeg',
@@ -112,6 +113,12 @@ class Library:
         return [{**{k: r[k] for k in ("id", "artist", "album", "title")},
                  "mime_type": mimetypes.guess_type(r['path'])[0] or 'application/octet-stream',
                  "available": self.resolve(r["path"]).is_file()} for r in rows]
+
+    def station_track(self, ident):
+        with self.connect() as con:
+            con.row_factory = sqlite3.Row
+            row = con.execute('SELECT rowid AS id,path,artist,album,title FROM tracks WHERE rowid=?', (ident,)).fetchone()
+        return self.describe([row])[0] if row else None
 
     def shuffle_batch(self, after=0):
         # Keyset pagination reads indexed rows only; it does not enumerate folders.
@@ -307,6 +314,17 @@ class Handler(SimpleHTTPRequestHandler):
     visuals = None
     mp3_cache = None
     radio = None
+    control_access = False
+    control_token = secrets.token_urlsafe(32)
+
+    def station_state(self, since=None):
+        state = self.radio.snapshot(since)
+        state['can_control'] = self.control_access
+        if self.control_access: state['control_token'] = self.control_token
+        return state
+
+    def trusted_control_host(self):
+        return self.headers.get('Host', '').split(':')[0].lower() in ('192.168.68.81', 'greatatuin', 'localhost', '127.0.0.1')
 
     def visualizer_parts(self):
         source = (self.visuals / 'index.html').read_text(encoding='utf-8')
@@ -317,6 +335,14 @@ class Handler(SimpleHTTPRequestHandler):
         return source[:start] + source[end:], controls
 
     def end_headers(self):
+        if urlparse(self.path).path == '/stream.mp3':
+            # Webamp uses an anonymous cross-origin audio element, including from
+            # DarkRide's qrc: page (Origin: null). Direct browser playback alone
+            # does not exercise this requirement. Scope it to the public radio.
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Icy-MetaData, Range')
+            self.send_header('Access-Control-Expose-Headers', 'Content-Type, Content-Length, Content-Range, Accept-Ranges, icy-name')
         self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-src 'self'")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Cache-Control", "no-store")
@@ -331,14 +357,42 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command != "HEAD": self.wfile.write(data)
 
     def do_POST(self):
-        self.send_error(405, "Indexing and system controls are disabled")
+        if urlparse(self.path).path != '/api/station/control':
+            return self.send_error(405, "Indexing and system controls are disabled")
+        origin = self.headers.get('Origin')
+        if (not self.control_access or not self.trusted_control_host() or
+            not secrets.compare_digest(self.headers.get('X-Shuffle-Control', ''), self.control_token) or
+            (origin and origin != 'http://' + self.headers.get('Host', ''))):
+            return self.send_error(403, 'Station controls are available on the LAN player only')
+        try:
+            size = int(self.headers.get('Content-Length', '0'))
+            if not 0 < size <= 1048576 or self.headers.get_content_type() != 'application/json': raise ValueError()
+            payload = json.loads(self.rfile.read(size))
+            if not isinstance(payload, dict): raise ValueError()
+            self.radio.control(payload.get('action'), payload)
+            return self.content(json.dumps(self.station_state()), 'application/json')
+        except (ValueError, TypeError) as error:
+            return self.send_error(400, str(error) or 'Invalid station command')
 
     def do_HEAD(self):
         self.do_GET()
 
+    def do_OPTIONS(self):
+        if urlparse(self.path).path != '/stream.mp3':
+            return self.send_error(405, 'Preflight is available for the public radio only')
+        self.send_response(204)
+        self.send_header('Allow', 'GET, HEAD, OPTIONS')
+        self.send_header('Content-Length', '0')
+        self.end_headers()
+
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
+        if path == '/api/station':
+            if self.control_access and not self.trusted_control_host(): return self.send_error(403)
+            try: since = int(parse_qs(url.query).get('since', ['0'])[0])
+            except ValueError: return self.send_error(400)
+            return self.content(json.dumps(self.station_state(since)), 'application/json')
         if path == '/stream.mp3':
             return self.radio_stream()
         if path == '/api/listening':
@@ -383,7 +437,7 @@ class Handler(SimpleHTTPRequestHandler):
             if quality not in ('original', 'mp3'):
                 return self.send_error(400, 'Unknown playback quality')
             return self.media(path, quality)
-        if path in ("/", "/app.js", "/palette.js"):
+        if path in ("/", "/app.js", "/palette.js", "/station.js"):
             if path == '/':
                 text = (HERE / 'index.html').read_text(encoding='utf-8')
                 text = text.replace('<!-- SHUFFLIZER_CONTROLS -->', self.visualizer_parts()[1])
@@ -513,4 +567,8 @@ if __name__ == "__main__":
     Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
     Handler.mp3_cache = Mp3Cache(os.environ.get('PLAYBACK_CACHE', '/cache'), os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
     Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
+    class LanHandler(Handler):
+        control_access = True
+    lan = ThreadingHTTPServer(('0.0.0.0', 8081), LanHandler)
+    threading.Thread(target=lan.serve_forever, daemon=True).start()
     ThreadingHTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

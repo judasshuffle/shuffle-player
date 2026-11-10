@@ -1,5 +1,19 @@
 # Remote listening: preserve the existing address
 
+The LAN player now controls the radio's shared queue. Public listening stays
+at the exact URL below, while station changes are accepted only on LAN 8094.
+See [SHARED-STATION.md](SHARED-STATION.md). Earlier independent-queue descriptions
+below are historical.
+
+Current follow-up: the user has corrected TCP 8001 forwarding to the NAS.
+The public URL now returns MP3 bytes and its marked requests appear in the
+Shuffle Player logs, matching LAN behavior. A separate Webamp CORS requirement
+was then identified in the actual installed DarkRide client and fixed on the
+radio endpoint. See [DARKRIDE-COMPATIBILITY.md](DARKRIDE-COMPATIBILITY.md).
+The user confirmed that the unchanged URL now plays in the actual DarkRide
+radio. The older inspection/cutover notes below describe the evidence before
+this follow-up.
+
 The user confirmed that the MP3 address must remain exactly:
 
 **http://shuffle.tplinkdns.com:8001/stream.mp3**

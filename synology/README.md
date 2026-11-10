@@ -1,8 +1,21 @@
 # Synology browser player
 
+Latest saved shared-station version and outstanding verification:
+[HANDOFF-2026-11-10.md](HANDOFF-2026-11-10.md).
+
+Current behavior: the LAN webpage controls the same shared station heard in
+DarkRide. See [SHARED-STATION.md](SHARED-STATION.md) for controls, optional
+browser monitoring, deployment ports and rollback. This supersedes earlier
+notes below describing independent browser and radio queues.
+
 The working deployed version and future recovery procedure are recorded in
 [CHECKPOINT-RESTORE.md](CHECKPOINT-RESTORE.md). SQLite and music are separate
 from the GitHub application-code backup.
+
+The saved checkpoint predates the Webamp cross-origin fix. Current radio
+diagnosis, routing verification, deployed correction, and confirmed actual
+DarkRide playback confirmation are recorded in
+[DARKRIDE-COMPATIBILITY.md](DARKRIDE-COMPATIBILITY.md).
 
 ## Live NAS deployment — 10 November 2026
 
