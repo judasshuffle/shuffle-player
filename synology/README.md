@@ -1,5 +1,8 @@
 # Synology browser player
 
+Latest continuity deployment and natural-EOF/reconnect verification:
+[CONTINUITY-2026-11-11.md](CONTINUITY-2026-11-11.md).
+
 Latest saved shared-station version and outstanding verification:
 [HANDOFF-2026-11-10.md](HANDOFF-2026-11-10.md).
 

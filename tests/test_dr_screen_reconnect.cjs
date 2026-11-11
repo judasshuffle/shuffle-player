@@ -7,6 +7,7 @@ const path = require('node:path');
 const {spawn} = require('node:child_process');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || '../synology/cache/reconnect-test/node_modules/playwright-core');
 const root = path.resolve(__dirname, '..');
+const keepMuted = process.env.RECONNECT_MUTED !== '0';
 let requests = 0, maxStreams = 0, offlineUntil = 0, navigations = 0;
 const streams = new Set(), events = [];
 let encoder;
@@ -69,26 +70,26 @@ let browser;
   await page.waitForFunction(()=>document.querySelector('audio').currentTime>4.5);
   const changed=await sample();assert(Math.abs(changed.frequency-660)<90,JSON.stringify(changed));
   assert.equal(requests,1,'Normal programme change keeps the MP3 connection');
-  await page.evaluate(()=>{player.volume=0.8;player.muted=true;window.playingBeforeDrop=window.testStats.playing;});
+  await page.evaluate(muted=>{player.volume=0.8;player.muted=muted;window.playingBeforeDrop=window.testStats.playing;},keepMuted);
   const droppedAt=Date.now();offlineUntil=droppedAt+3500;
   for(const response of [...streams])response.destroy(); // The only interruption.
   await page.waitForFunction(()=>window.testStats.playing>window.playingBeforeDrop,{},{timeout:25000});
   const preserved=await page.evaluate(()=>({muted:player.muted,nativeVolume:player.volume,gain:gain.gain.value,
     elements:document.querySelectorAll('audio').length,sources:window.testStats.sources,
     recoveries:window.testStats.playing-window.playingBeforeDrop}));
-  assert.equal(preserved.muted,true);assert.equal(preserved.nativeVolume,0.8);
+  assert.equal(preserved.muted,keepMuted);assert.equal(preserved.nativeVolume,0.8);
   assert(Math.abs(preserved.gain-0.37)<0.00001);assert.equal(preserved.elements,1);assert.equal(preserved.sources,1);
   assert.equal(preserved.recoveries,1);assert.equal(maxStreams,1);assert.equal(navigations,1);
   // Verify the preserved mute, then restore the visitor's unmuted state and hear
   // measurable PCM return through the existing post-analysis volume gain.
   await page.waitForTimeout(100);
-  assert((await sample()).rms<0.002,'Mute remains effective after reconnection');
-  await page.evaluate(()=>{
-    player.muted=false;
+  if(keepMuted) assert((await sample()).rms<0.002,'Mute remains effective after reconnection');
+  await page.evaluate(wasMuted=>{
+    if(wasMuted) player.muted=false;
     window.outputProbe=context.createAnalyser();
     gain.connect(window.outputProbe);
     window.probeReadyAt=performance.now()+100;
-  });
+  },keepMuted);
   await page.waitForFunction(()=>{
     const data=new Float32Array(window.outputProbe.fftSize);window.outputProbe.getFloatTimeDomainData(data);
     // A new analyser initially contains zero-filled history. Let its complete

@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:owner-dj-20261111
+    image: shuffle-player:continuity-20261111
     build:
       context: .
       dockerfile: synology/Dockerfile
