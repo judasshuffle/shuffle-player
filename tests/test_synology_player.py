@@ -10,6 +10,8 @@ import unittest
 import wave
 import shutil
 import time
+import hmac
+import secrets
 
 PROJECT = Path(__file__).resolve().parents[1]
 
@@ -27,6 +29,21 @@ fixtures = load("synology_fixtures", "fixtures.py")
 
 
 class PlayerTests(unittest.TestCase):
+    def test_dr_screen_listener_routes(self):
+        for path in ('/dr-screen', '/dr-screen/'):
+            status, headers, body = self.request(path)
+            self.assertEqual(status, 200)
+            self.assertIn('text/html', headers['Content-Type'])
+            self.assertEqual(body.count(b'<audio'), 1)
+            self.assertIn(b'src="/stream.mp3"', body)
+            self.assertNotIn(b'/station.js', body)
+            self.assertNotIn(b'<!-- SHUFFLIZER_CONTROLS -->', body)
+        for path in ('/dr-screen.js', '/dr-screen-entity.js'):
+            status, headers, body = self.request(path)
+            self.assertEqual(status, 200)
+            self.assertIn('javascript', headers['Content-Type'])
+            self.assertNotIn(b'/api/station/control', body)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -39,6 +56,7 @@ class PlayerTests(unittest.TestCase):
         self.addCleanup(self.playback_temp.cleanup)
         handler = type("TestHandler", (server.Handler,), dict(
             library=self.library, visuals=PROJECT / "web/shufflizer",
+            control_access=True, owner_auth=server.OwnerAuth('a' * 64),
             mp3_cache=server.Mp3Cache(self.playback_temp.name),
             radio=radio_module.LibraryRadio(self.library)))
         self.httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
@@ -95,24 +113,92 @@ class PlayerTests(unittest.TestCase):
         with self.assertRaises(ValueError): radio.control('replace', {'ids':[999999]})
         self.assertEqual(radio.snapshot()['current']['id'], 2)
 
-        def post(token='', origin=None):
+        def post(signed=False, origin=None):
             client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=5)
-            headers = {'Content-Type':'application/json', 'X-Shuffle-Control':token}
+            body = json.dumps({'action':'replace','ids':[1,3]})
+            headers = {'Content-Type':'application/json'}
+            if signed: headers.update(self.sign('POST', '/api/station/control', body.encode()))
             if origin: headers['Origin'] = origin
-            client.request('POST', '/api/station/control', json.dumps({'action':'replace','ids':[1,3]}), headers)
+            client.request('POST', '/api/station/control', body, headers)
             response = client.getresponse(); data = response.read(); client.close()
             return response.status, data
         self.assertNotIn('control_token', json.loads(self.request('/api/station')[2]))
-        self.assertEqual(post(handler.control_token)[0], 403, 'Public listener port cannot control even with a token')
-        handler.control_access = True
+        self.assertFalse(json.loads(self.request('/api/station')[2])['can_control'])
+        self.assertEqual(post()[0], 403)
+        handler.control_access = False
         try:
-            token = json.loads(self.request('/api/station')[2])['control_token']
-            self.assertEqual(post()[0], 403)
-            self.assertEqual(post(token, 'http://hostile.example')[0], 403)
-            status, data = post(token)
+            self.assertEqual(post(True)[0], 403, 'Public legacy endpoint is disabled even with a signature')
+            handler.control_access = True
+            status, data = post(True)
             self.assertEqual(status, 200)
             self.assertEqual(json.loads(data)['current']['id'], 1)
-        finally: handler.control_access = False
+        finally: handler.control_access = True
+
+    def sign(self, method, path, body=b'', key=None, stamp=None, nonce=None):
+        auth = self.httpd.RequestHandlerClass.owner_auth
+        stamp = str(stamp or int(time.time()))
+        nonce = nonce or secrets.token_hex(16)
+        text = '\n'.join((method, path, auth.epoch, stamp, nonce, hashlib.sha256(body).hexdigest())).encode()
+        signature = hmac.new((key or 'a' * 64).encode(), text, hashlib.sha256).hexdigest()
+        return {'X-Shuffle-Epoch':auth.epoch, 'X-Shuffle-Time':stamp, 'X-Shuffle-Nonce':nonce, 'X-Shuffle-Signature':signature}
+
+    def dj(self, payload, signed=True, headers=None):
+        body = json.dumps(payload).encode()
+        request_headers = {'Content-Type':'application/json'}
+        if signed: request_headers.update(self.sign('POST', '/api/dj', body))
+        if headers: request_headers.update(headers)
+        client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=15)
+        client.request('POST', '/api/dj', body, request_headers)
+        response=client.getresponse(); data=response.read(); client.close()
+        return response.status, data
+
+    def test_owner_dj_permissions_and_queue_semantics(self):
+        handler=self.httpd.RequestHandlerClass
+        handler.control_access=False
+        handler.radio.control('replace', {'ids':[1,2]})
+        before=handler.radio.snapshot()['version']
+        for action in ('play','append','shuffle','next'):
+            self.assertEqual(self.dj({'action':action,'query':'Copper'}, signed=False)[0],403)
+            self.assertEqual(handler.radio.snapshot()['version'],before)
+        payload={'action':'play','query':'Copper'}
+        body=json.dumps(payload).encode()
+        self.assertEqual(self.dj(payload, headers=self.sign('POST','/api/dj',body,key='b'*64))[0],403)
+        self.assertEqual(self.dj(payload, headers=self.sign('POST','/api/dj',body,stamp=int(time.time())-300))[0],403)
+        valid=self.sign('POST','/api/dj',body)
+        self.assertEqual(self.dj({'action':'shuffle'},headers=valid)[0],403,'Signature binds exact command body')
+        status,data=self.dj(payload,headers=valid)
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(data)['queue_count'],1)
+        self.assertEqual(self.dj(payload,headers=valid)[0],403,'Replay denied')
+        self.assertEqual(self.dj({'action':'search','query':'Dylan'})[0],200)
+        handler.radio.control('toggle', {})
+        position=handler.radio.snapshot()['position']
+        status,data=self.dj({'action':'append','query':'Orbit'})
+        appended=json.loads(data)
+        self.assertEqual(status,200)
+        self.assertEqual(appended['queue_count'],2)
+        self.assertFalse(appended['playing'])
+        self.assertEqual(appended['position'],position)
+        self.assertEqual(self.dj({'action':'next'})[0],200)
+        status,data=self.dj({'action':'shuffle'})
+        self.assertEqual(status,200)
+        self.assertEqual(json.loads(data)['queue_count'],9,'Shuffle filters unavailable tracks')
+        self.assertNotIn('control_token',json.loads(data))
+        for path in ('/app.js','/station.js','/api/search','/api/shuffle','/api/styles'):
+            self.assertEqual(self.request(path)[0],403)
+        self.assertEqual(self.request('/')[0],302)
+        self.assertEqual(self.request('/')[1]['Location'],'/dr-screen')
+        self.assertEqual(self.request('/dr-remote')[0],200)
+        self.assertNotIn('queue',json.loads(self.request('/api/station')[2]))
+        self.assertEqual(self.request('/secrets/owner-key')[0],404)
+
+    def test_owner_signature_fail_closed_and_restart_epoch(self):
+        auth=self.httpd.RequestHandlerClass.owner_auth
+        headers=self.sign('GET','/api/station')
+        self.assertFalse(server.OwnerAuth().verify('GET','/api/station',headers))
+        restarted=server.OwnerAuth('a'*64)
+        self.assertFalse(restarted.verify('GET','/api/station',headers))
+        self.assertFalse(auth.verify('GET','/api/different',headers))
 
     @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
     def test_station_controls_keep_existing_stream_connection(self):

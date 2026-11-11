@@ -67,7 +67,7 @@
     context.resume().catch(() => {});
     busy = true;
     try {
-      const response = await fetch('/api/station/control', {method:'POST', headers:{'Content-Type':'application/json','X-Shuffle-Control':state.control_token}, body:JSON.stringify({action,...extra})});
+      const response = await fetch('/api/station/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({action,...extra})});
       if (!response.ok) throw Error('Station command failed (' + response.status + '). Refresh and try again.');
       show(await response.json());
     } catch (error) { el('stationStatus').textContent = error.message; }

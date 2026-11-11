@@ -15,6 +15,8 @@ from collections import OrderedDict
 from urllib.parse import parse_qs, urlparse
 import queue
 import secrets
+import hmac
+import time
 
 # Minimal container images may lack the OS MIME database.
 for extension, kind in {'.flac': 'audio/flac', '.mp3': 'audio/mpeg',
@@ -23,6 +25,35 @@ for extension, kind in {'.flac': 'audio/flac', '.mp3': 'audio/mpeg',
     mimetypes.add_type(kind, extension)
 
 HERE = Path(__file__).resolve().parent
+
+
+class OwnerAuth:
+    """One privately provisioned owner key; signed requests expire and cannot replay."""
+    def __init__(self, key=''):
+        if key and not re.fullmatch(r'[0-9a-f]{64}', key):
+            raise ValueError('Owner key must contain 64 lowercase hex characters')
+        self.key = key.encode('ascii')
+        self.epoch = secrets.token_hex(16)
+        self.used = {}
+        self.lock = threading.Lock()
+
+    def verify(self, method, path, headers, body=b''):
+        if not self.key: return False  # No configured key never means open access.
+        stamp = headers.get('X-Shuffle-Time', '')
+        nonce = headers.get('X-Shuffle-Nonce', '')
+        signature = headers.get('X-Shuffle-Signature', '')
+        if headers.get('X-Shuffle-Epoch', '') != self.epoch: return False
+        if not re.fullmatch(r'\d{10}', stamp) or not re.fullmatch(r'[a-zA-Z0-9{}-]{16,80}', nonce): return False
+        now = time.time()
+        if abs(now - int(stamp)) > 120 or not re.fullmatch(r'[0-9a-f]{64}', signature): return False
+        message = '\n'.join((method, path, self.epoch, stamp, nonce, hashlib.sha256(body).hexdigest())).encode()
+        expected = hmac.new(self.key, message, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature): return False
+        with self.lock:
+            self.used = {key:expiry for key, expiry in self.used.items() if expiry > now}
+            if nonce in self.used or len(self.used) >= 10000: return False
+            self.used[nonce] = now + 240
+        return True
 
 # Families match existing tags only; no classification is inferred from audio.
 STYLE_FAMILIES = {
@@ -315,12 +346,13 @@ class Handler(SimpleHTTPRequestHandler):
     mp3_cache = None
     radio = None
     control_access = False
-    control_token = secrets.token_urlsafe(32)
+    owner_auth = OwnerAuth()
 
-    def station_state(self, since=None):
+    def station_state(self, since=None, owner=False):
         state = self.radio.snapshot(since)
-        state['can_control'] = self.control_access
-        if self.control_access: state['control_token'] = self.control_token
+        state['can_control'] = owner
+        if not owner:
+            for key in ('queue', 'queue_start'): state.pop(key, None)
         return state
 
     def trusted_control_host(self):
@@ -357,22 +389,49 @@ class Handler(SimpleHTTPRequestHandler):
         if self.command != "HEAD": self.wfile.write(data)
 
     def do_POST(self):
-        if urlparse(self.path).path != '/api/station/control':
+        path = urlparse(self.path).path
+        if path not in ('/api/station/control', '/api/dj'):
             return self.send_error(405, "Indexing and system controls are disabled")
-        origin = self.headers.get('Origin')
-        if (not self.control_access or not self.trusted_control_host() or
-            not secrets.compare_digest(self.headers.get('X-Shuffle-Control', ''), self.control_token) or
-            (origin and origin != 'http://' + self.headers.get('Host', ''))):
-            return self.send_error(403, 'Station controls are available on the LAN player only')
         try:
+            if path == '/api/station/control' and not self.control_access:
+                return self.send_error(403, 'Use the signed DJ endpoint')
             size = int(self.headers.get('Content-Length', '0'))
             if not 0 < size <= 1048576 or self.headers.get_content_type() != 'application/json': raise ValueError()
-            payload = json.loads(self.rfile.read(size))
+            body = self.rfile.read(size)
+            if not self.owner_auth.verify('POST', self.path, self.headers, body):
+                return self.send_error(403, 'Owner signature required, expired or already used')
+            payload = json.loads(body)
             if not isinstance(payload, dict): raise ValueError()
+            if path == '/api/dj': return self.dj_command(payload)
             self.radio.control(payload.get('action'), payload)
-            return self.content(json.dumps(self.station_state()), 'application/json')
+            return self.content(json.dumps(self.station_state(owner=True)), 'application/json')
         except (ValueError, TypeError) as error:
             return self.send_error(400, str(error) or 'Invalid station command')
+
+    def dj_command(self, payload):
+        action = payload.get('action')
+        query = payload.get('query', '')
+        if not isinstance(query, str) or len(query) > 200: raise ValueError('Search is too long')
+        if action == 'search':
+            offset = payload.get('offset', 0)
+            if type(offset) is not int or not 0 <= offset <= 1000000: raise ValueError('Invalid offset')
+            return self.content(json.dumps(self.library.search(query, offset)), 'application/json')
+        if action in ('play', 'append', 'shuffle'):
+            if action != 'shuffle' and not query.strip(): raise ValueError('Type a search first')
+            ids, cursor = [], 0
+            while True:
+                result = self.library.shuffle_batch(cursor) if action == 'shuffle' else self.library.search(query, cursor)
+                if result.get('error'): raise ValueError(result['error'])
+                ids.extend(track['id'] for track in result['tracks'] if track['available'])
+                if len(ids) > 50000: raise ValueError('Too many tracks')
+                if not result['has_more']: break
+                cursor = result['after'] if action == 'shuffle' else cursor + 50
+            if not ids: raise ValueError('No available matches. Queue unchanged.')
+            if action == 'shuffle': secrets.SystemRandom().shuffle(ids)
+            self.radio.control('append' if action == 'append' else 'replace', {'ids': ids, 'repeat': action == 'shuffle'})
+        elif action == 'next': self.radio.control('next', {})
+        elif action != 'state': raise ValueError('Unknown DJ command')
+        return self.content(json.dumps(self.station_state(owner=True)), 'application/json')
 
     def do_HEAD(self):
         self.do_GET()
@@ -388,11 +447,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
+        if path == '/api/owner-challenge':
+            return self.content(json.dumps({'epoch': self.owner_auth.epoch, 'time': int(time.time())}), 'application/json')
         if path == '/api/station':
             if self.control_access and not self.trusted_control_host(): return self.send_error(403)
             try: since = int(parse_qs(url.query).get('since', ['0'])[0])
             except ValueError: return self.send_error(400)
-            return self.content(json.dumps(self.station_state(since)), 'application/json')
+            owner = self.owner_auth.verify('GET', self.path, self.headers)
+            return self.content(json.dumps(self.station_state(since, owner)), 'application/json')
         if path == '/stream.mp3':
             return self.radio_stream()
         if path == '/api/listening':
@@ -401,6 +463,7 @@ class Handler(SimpleHTTPRequestHandler):
                 'lossless_track': base + '/media/{id}?quality=original',
                 'mp3_track': base + '/media/{id}?quality=mp3'}), 'application/json')
         if path == '/api/styles':
+            if not self.control_access: return self.send_error(403)
             return self.content(json.dumps(self.library.styles()), 'application/json')
         if path == '/artwork/fallback.svg':
             return self.content('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300"><rect width="300" height="300" fill="#24343d"/><circle cx="150" cy="135" r="75" fill="#10151c"/><circle cx="150" cy="135" r="22" fill="#b8f0d2"/><text x="150" y="255" text-anchor="middle" fill="#b8f0d2" font-family="sans-serif" font-size="18">No album artwork</text></svg>', 'image/svg+xml')
@@ -419,6 +482,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             return
         if path in ("/api/search", "/api/shuffle"):
+            if not self.control_access: return self.send_error(403, 'Use the owner DJ remote')
             query = parse_qs(url.query)
             try:
                 offset = int(query.get("offset", ["0"])[0])
@@ -437,7 +501,22 @@ class Handler(SimpleHTTPRequestHandler):
             if quality not in ('original', 'mp3'):
                 return self.send_error(400, 'Unknown playback quality')
             return self.media(path, quality)
+        if path in ('/dr-screen', '/dr-screen/'):
+            text = (HERE / 'dr-screen.html').read_text(encoding='utf-8')
+            text = text.replace('<!-- SHUFFLIZER_CONTROLS -->', self.visualizer_parts()[1])
+            return self.content(text, 'text/html; charset=utf-8')
+        if path in ('/dr-remote', '/dr-remote/'):
+            return self.content((HERE / 'dr-remote.html').read_bytes(), 'text/html; charset=utf-8')
+        if path in ('/dr-screen.js', '/dr-screen-entity.js', '/dr-dj.js', '/dr-remote.js', '/owner.js', '/sha256.js'):
+            return self.content((HERE / path.lstrip('/')).read_bytes(), 'text/javascript')
         if path in ("/", "/app.js", "/palette.js", "/station.js"):
+            if not self.control_access and path != '/palette.js':
+                if path != '/': return self.send_error(403, 'Dashboard is LAN-only')
+                self.send_response(302)
+                self.send_header('Location', '/dr-screen')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return
             if path == '/':
                 text = (HERE / 'index.html').read_text(encoding='utf-8')
                 text = text.replace('<!-- SHUFFLIZER_CONTROLS -->', self.visualizer_parts()[1])
@@ -567,6 +646,8 @@ if __name__ == "__main__":
     Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
     Handler.mp3_cache = Mp3Cache(os.environ.get('PLAYBACK_CACHE', '/cache'), os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
     Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
+    key_file = os.environ.get('SHUFFLE_OWNER_KEY_FILE')
+    Handler.owner_auth = OwnerAuth(Path(key_file).read_text().strip() if key_file else '')
     class LanHandler(Handler):
         control_access = True
     lan = ThreadingHTTPServer(('0.0.0.0', 8081), LanHandler)

@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:synology-be65178
+    image: shuffle-player:owner-dj-20261111
     build:
       context: .
       dockerfile: synology/Dockerfile
@@ -11,7 +11,14 @@ services:
       - "192.168.68.81:8001:8080"
     environment:
       PUBLIC_LISTENING_BASE: http://shuffle.tplinkdns.com:8001
+      SHUFFLE_OWNER_KEY_FILE: /run/shuffle-owner/owner-key
     volumes:
+      - type: bind
+        source: /volume1/docker/shuffle-player/secrets
+        target: /run/shuffle-owner
+        read_only: true
+        bind:
+          create_host_path: false
       - type: bind
         source: /volume1/docker/shuffle-player/data
         target: /data
@@ -31,7 +38,7 @@ services:
     security_opt: [no-new-privileges:true]
     restart: unless-stopped
     healthcheck:
-      test: [CMD, python, -B, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/search?q=Bob%20Dylan', timeout=15).read()"]
+      test: [CMD, python, -B, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/dr-screen', timeout=15).read()"]
       interval: 60s
       timeout: 20s
       start_period: 120s

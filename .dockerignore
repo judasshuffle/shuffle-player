@@ -20,3 +20,12 @@
 !synology/radio.py
 
 !synology/station.js
+!synology/dr-screen.html
+!synology/dr-screen.js
+!synology/dr-screen-entity.js
+!synology/dr-remote.html
+!synology/dr-remote.js
+!synology/dr-dj.js
+!synology/owner.js
+!synology/sha256.js
+!synology/sha256-LICENSE.txt

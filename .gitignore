@@ -43,6 +43,8 @@ web/shufflizer/api/
 *.p12
 *.pfx
 synology/secrets/
+**/install-owner-remote.js
+**/owner-key
 synology/data/
 synology/cache/
 /data/
@@ -51,6 +53,12 @@ synology/cache/
 # Library files, SQLite copies/sidecars, and generated runtime output
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
 *.db-journal
 *.flac
 *.mp3

@@ -5,12 +5,14 @@ import time
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 import numpy as np
+from owner_request import signed_request
 
 LAN = 'http://192.168.68.81:8094'
 PUBLIC = 'http://shuffle.tplinkdns.com:8001'
 
 def get(base, route):
-    with urlopen(base + route, timeout=45) as response:
+    request = signed_request(base, route) if base == LAN and route.startswith('/api/station') else base + route
+    with urlopen(request, timeout=45) as response:
         return json.load(response)
 
 deadline = time.monotonic() + 90
@@ -22,19 +24,17 @@ while True:
     except (OSError, AssertionError):
         if time.monotonic() > deadline: raise
         time.sleep(1)
-token = state['control_token']
 
 def command(action, **payload):
     body = json.dumps({'action':action, **payload}).encode()
-    request = Request(LAN + '/api/station/control', data=body,
-        headers={'Content-Type':'application/json', 'X-Shuffle-Control':token, 'Origin':LAN})
+    request = signed_request(LAN, '/api/station/control', {'action':action, **payload})
     with urlopen(request, timeout=45) as response: return json.load(response)
 
 public = get(PUBLIC, '/api/station')
 assert not public['can_control'] and 'control_token' not in public
 try:
     urlopen(Request(PUBLIC + '/api/station/control', data=b'{"action":"next"}',
-        headers={'Content-Type':'application/json','X-Shuffle-Control':token}), timeout=15)
+        headers={'Content-Type':'application/json'}), timeout=15)
     raise AssertionError('Public control must be rejected')
 except HTTPError as error: assert error.code == 403
 

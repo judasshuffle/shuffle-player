@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DarkRide · Shufflizer live screen</title>
+<style>
+html,body{margin:0;width:100%;height:100%;background:#000;color:#b8f0d2;font:16px sans-serif}
+iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+#notice{position:fixed;bottom:16px;left:16px;right:16px;z-index:2;background:#10151ce8;padding:12px;border-radius:8px}
+button{font:inherit;padding:8px;margin-left:12px}#visualizerControls{display:none}
+#notice label{display:inline-block;margin-left:16px}#volume{width:120px;vertical-align:middle}
+</style></head><body>
+<audio id="player" crossorigin="anonymous" preload="auto" src="/stream.mp3"></audio>
+<div id="visualizer"></div>
+<div id="visualizerControls" hidden><!-- SHUFFLIZER_CONTROLS --></div>
+<div id="notice"><span id="status" role="status">Connecting to live MP3…</span><button id="start">Enable screen audio</button><label for="volume">My volume <input id="volume" type="range" min="0" max="100" value="100" aria-label="My screen volume"></label></div>
+<script src="/dr-screen.js"></script>
+</body></html>

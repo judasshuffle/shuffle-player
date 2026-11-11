@@ -35,7 +35,7 @@ const commands = [], timers = [];
 const context = vm.createContext({window, document:{getElementById:id=>elements[id],createElement:()=>new Element()},
   performance:{now:()=>0}, localStorage:{getItem:()=>null,setItem:()=>{}},
   fetch:async (url, options)=>{
-    if (options?.method === 'POST') { assert.equal(options.headers['X-Shuffle-Control'],'test-token'); commands.push(JSON.parse(options.body)); return {ok:true,json:async()=>station}; }
+    if (options?.method === 'POST') { commands.push(JSON.parse(options.body)); return {ok:true,json:async()=>station}; }
     return {ok:true,json:async()=>url.startsWith('/api/station') ? station : url === '/api/styles' ? {styles:[],tagged:2,untagged:1} : {tracks,has_more:false}};
   }, console,setTimeout:(fn,ms)=>{ if(ms===1000) {timers.push(fn);return 1;} return setTimeout(fn,ms); },clearTimeout});
 vm.runInContext(fs.readFileSync('synology/app.js','utf8'), context);
