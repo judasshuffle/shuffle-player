@@ -197,6 +197,9 @@ async function collectMatches(shuffle = false) {
   return collected;
 }
 async function useMatches(start, shuffle = false) {
+  if (stationController && (shuffle || start)) {
+    return stationController.command(shuffle ? 'shuffle' : 'program', shuffle ? {} : {query});
+  }
   try {
     const matches = await collectMatches(shuffle);
     if (!matches) return;

@@ -46,7 +46,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
   assert.ok(elements.title.textContent.includes('Copper Pulse'));
   assert.equal(elements.player.paused,true,'Monitor defaults off to avoid double audio with DarkRide');
   await elements.playMatches.onclick();
-  assert.deepEqual(commands.at(-1),{action:'replace',ids:[1,2],repeat:false});
+  assert.deepEqual(commands.at(-1),{action:'program',query:''});
   await elements.queueMatches.onclick();
   assert.equal(commands.at(-1).action,'append');
   await elements.next.onclick(); assert.equal(commands.at(-1).action,'next');

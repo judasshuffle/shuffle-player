@@ -1,5 +1,8 @@
 # Synology browser player
 
+Current queue behaviour and disposable-queue deployment:
+[ROLLING-SHUFFLE.md](ROLLING-SHUFFLE.md).
+
 Latest continuity deployment and natural-EOF/reconnect verification:
 [CONTINUITY-2026-11-11.md](CONTINUITY-2026-11-11.md).
 

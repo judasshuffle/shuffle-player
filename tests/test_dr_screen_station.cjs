@@ -2,7 +2,8 @@
 const assert = require('node:assert/strict');
 const {spawn} = require('node:child_process');
 const {chromium} = require('../synology/cache/reconnect-test/node_modules/playwright-core');
-const fixture = spawn('python', ['-B', 'tests/station_browser_fixture.py'], {windowsHide:true});
+const rolling = process.argv.includes('--rolling');
+const fixture = spawn('python', ['-B', 'tests/station_browser_fixture.py', ...(rolling ? ['--rolling'] : [])], {windowsHide:true});
 fixture.stderr.on('data', data=>process.stderr.write(data));
 let browser;
 (async()=>{
@@ -13,6 +14,23 @@ let browser;
   page.on('request',r=>{if(new URL(r.url()).pathname==='/stream.mp3')requests++;});
   page.on('framenavigated',f=>{if(f===page.mainFrame())navigations++;});
   await page.goto(`http://127.0.0.1:${port}/dr-screen`,{waitUntil:'domcontentloaded'});
+  if(rolling) {
+    let state, deadline=Date.now()+30000;
+    do {
+      state=await (await fetch(`http://127.0.0.1:${port}/test-state`)).json();
+      if(state.completed>=6) break;
+      await page.waitForTimeout(250);
+    } while(Date.now()<deadline);
+    assert(state.completed>=6,JSON.stringify(state));
+    assert.equal(state.playing,true);
+    await page.waitForFunction(()=>{
+      const a=playerAudio.analyser,data=new Float32Array(a.fftSize);a.getFloatTimeDomainData(data);
+      return Math.sqrt(data.reduce((s,n)=>s+n*n,0)/data.length)>0.01;
+    });
+    assert(state.completed>=6);assert.equal(requests,1);assert.equal(navigations,1);
+    console.log(JSON.stringify({result:'PASS',rolling:true,completed:state.completed,streamRequests:requests,navigations}));
+    return;
+  }
   const audibleFrequency = frequency => page.waitForFunction(frequency=>{
     const a=window.playerAudio?.analyser;if(!a)return false;
     const bins=new Uint8Array(a.frequencyBinCount);a.getByteFrequencyData(bins);

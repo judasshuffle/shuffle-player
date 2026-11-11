@@ -120,6 +120,7 @@ class Library:
             raise ValueError("Use a consistent standalone SQLite backup without active journal files.")
         with self.connect() as con:
             columns = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
+            self.columns = columns
             self.has_genre = 'genre' in columns
             self.genre_counts = con.execute('SELECT genre,COUNT(*) FROM tracks GROUP BY genre').fetchall() if self.has_genre else []
             if not {"path", "artist", "album", "title"}.issubset(columns):
@@ -148,8 +149,28 @@ class Library:
     def station_track(self, ident):
         with self.connect() as con:
             con.row_factory = sqlite3.Row
-            row = con.execute('SELECT rowid AS id,path,artist,album,title FROM tracks WHERE rowid=?', (ident,)).fetchone()
-        return self.describe([row])[0] if row else None
+            extra = ',duration' if 'duration' in self.columns else ''
+            row = con.execute('SELECT rowid AS id,path,artist,album,title' + extra + ' FROM tracks WHERE rowid=?', (ident,)).fetchone()
+        return {**self.describe([row])[0], 'duration':row['duration'] if extra else 0} if row else None
+
+    def station_catalog(self):
+        # Metadata only: read the existing index, never enumerate music folders.
+        with self.connect() as con:
+            con.row_factory = sqlite3.Row
+            fields = [name for name in ('duration','tracknumber','discnumber') if name in self.columns]
+            rows = con.execute('SELECT rowid AS id,path,artist,album,title' + ''.join(','+name for name in fields) + ' FROM tracks').fetchall()
+        return [dict(row) for row in rows]
+
+    def program(self, query):
+        tracks, cursor = [], 0
+        while True:
+            result = self.search(query, cursor)
+            if result.get('error'): raise ValueError(result['error'])
+            tracks.extend(track['id'] for track in result['tracks'] if track['available'])
+            if not result['has_more']: break
+            cursor += 50
+        if not tracks: raise ValueError('No available matches. Queue unchanged.')
+        return tracks, bool(result.get('album_request'))
 
     def shuffle_batch(self, after=0):
         # Keyset pagination reads indexed rows only; it does not enumerate folders.
@@ -161,6 +182,38 @@ class Library:
                 "after": rows[499]["id"] if len(rows) >= 500 else after}
 
     def search(self, query="", offset=0):
+        album_command = re.match(r'^(?:(?:play|queue)\s+)?(?:the\s+)?album\s+(.+)$', query.strip(), re.I)
+        if album_command:
+            name = album_command[1].strip().strip('"')
+            with self.connect() as con:
+                con.row_factory = sqlite3.Row
+                rows = con.execute('SELECT rowid AS id,path,artist,album,title FROM tracks WHERE album = ? COLLATE NOCASE', (name,)).fetchall()
+            wanted = {row['id'] for row in rows}
+            catalog = {track['id']:track for track in self.station_catalog() if track['id'] in wanted}
+            import mutagen
+            def order(row):
+                data = catalog[row['id']]
+                disc, track = data.get('discnumber'), data.get('tracknumber')
+                if not disc or not track:
+                    with self.resolve(row['path']).open('rb') as source:
+                        tags = mutagen.File(source, easy=True)
+                    tags = tags or {}
+                    disc = disc or (tags.get('discnumber') or ['1'])[0]
+                    track = track or (tags.get('tracknumber') or [''])[0]
+                def number(value):
+                    match = re.match(r'^(\d+)', str(value))
+                    if not match: raise ValueError('Album track order is missing; cannot play this release in order.')
+                    return int(match[1])
+                return number(disc), number(track)
+            try:
+                ordered = [(order(row), row) for row in rows]
+                if len({key for key,row in ordered}) != len(ordered):
+                    raise ValueError('Several releases share this album title and track numbers; choose a specific release.')
+                rows = [row for key,row in sorted(ordered, key=lambda item:item[0])]
+            except (OSError, ValueError, TypeError, mutagen.MutagenError) as error:
+                return {'tracks':[], 'has_more':False, 'error':str(error)}
+            return {'tracks':self.describe(rows[offset:offset+50]), 'has_more':len(rows)>offset+50,
+                    'album_request':True, 'message':'Album in disc and track order; library shuffle resumes afterwards.'}
         text, decade, artist_only = interpret(query)
         explicit_style = re.match(r'^(?:genre|style)(?:\s*:\s*|\s+)', text, re.I)
         explicit_artist = re.match(r'^artist(?:\s*:\s*|\s+)', text, re.I)
@@ -403,6 +456,11 @@ class Handler(SimpleHTTPRequestHandler):
             payload = json.loads(body)
             if not isinstance(payload, dict): raise ValueError()
             if path == '/api/dj': return self.dj_command(payload)
+            if payload.get('action') == 'program':
+                query = payload.get('query', '')
+                if not isinstance(query,str) or len(query)>200: raise ValueError('Invalid search')
+                ids, album = self.library.program(query)
+                payload = {'action':'program', 'ids':ids, 'query':query, 'album':album}
             self.radio.control(payload.get('action'), payload)
             return self.content(json.dumps(self.station_state(owner=True)), 'application/json')
         except (ValueError, TypeError) as error:
@@ -418,17 +476,10 @@ class Handler(SimpleHTTPRequestHandler):
             return self.content(json.dumps(self.library.search(query, offset)), 'application/json')
         if action in ('play', 'append', 'shuffle'):
             if action != 'shuffle' and not query.strip(): raise ValueError('Type a search first')
-            ids, cursor = [], 0
-            while True:
-                result = self.library.shuffle_batch(cursor) if action == 'shuffle' else self.library.search(query, cursor)
-                if result.get('error'): raise ValueError(result['error'])
-                ids.extend(track['id'] for track in result['tracks'] if track['available'])
-                if len(ids) > 50000: raise ValueError('Too many tracks')
-                if not result['has_more']: break
-                cursor = result['after'] if action == 'shuffle' else cursor + 50
-            if not ids: raise ValueError('No available matches. Queue unchanged.')
-            if action == 'shuffle': secrets.SystemRandom().shuffle(ids)
-            self.radio.control('append' if action == 'append' else 'replace', {'ids': ids, 'repeat': action == 'shuffle'})
+            if action == 'shuffle': self.radio.control('shuffle', {})
+            else:
+                ids, album = self.library.program(query)
+                self.radio.control('append' if action == 'append' else 'program', {'ids':ids, 'album':album, 'query':query})
         elif action == 'next': self.radio.control('next', {})
         elif action != 'state': raise ValueError('Unknown DJ command')
         return self.content(json.dumps(self.station_state(owner=True)), 'application/json')
@@ -645,7 +696,8 @@ if __name__ == "__main__":
     Handler.library = Library(os.environ.get("JUKEBOX_DB_PATH", "/data/jukebox.db"), os.environ.get("JUKEBOX_MUSIC_ROOT", "/mnt/lossless"))
     Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
     Handler.mp3_cache = Mp3Cache(os.environ.get('PLAYBACK_CACHE', '/cache'), os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
-    Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
+    Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'),
+                                start_paused=os.environ.get('SHUFFLE_START_PAUSED') == '1')
     key_file = os.environ.get('SHUFFLE_OWNER_KEY_FILE')
     Handler.owner_auth = OwnerAuth(Path(key_file).read_text().strip() if key_file else '')
     class LanHandler(Handler):

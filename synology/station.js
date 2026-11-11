@@ -59,7 +59,7 @@
       select.disabled = remove.disabled = !state.can_control;
       row.append(select, remove); el('queue').append(row);
     });
-    el('queueInfo').textContent = `${state.queue_count} tracks in the NAS station queue; showing ${preview.length} around the current track. Queue stays in memory until the player container restarts.`;
+    el('queueInfo').textContent = `${state.queue_count} tracks including recent history · about ${Math.ceil((state.queued_seconds || 0) / 60)} minutes ahead. Requests play before random picks. The queue is disposable.`;
     monitor().catch(() => {});
   }
   async function command(action, extra = {}) {

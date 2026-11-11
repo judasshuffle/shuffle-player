@@ -97,7 +97,7 @@ class PlayerTests(unittest.TestCase):
         radio = handler.radio
         state = radio.control('replace', {'ids':[1,2]})
         self.assertEqual(state['current']['id'], 1)
-        self.assertEqual(state['queue_count'], 2)
+        self.assertEqual([t['id'] for t in state['queue'][:2]], [1,2])
         time.sleep(.08)
         self.assertGreater(radio.snapshot()['position'], state['position'])
         paused = radio.control('toggle', {})
@@ -105,7 +105,7 @@ class PlayerTests(unittest.TestCase):
         self.assertAlmostEqual(radio.snapshot()['position'], paused['position'], places=3)
         radio.control('append', {'ids':[3]})
         self.assertFalse(radio.snapshot()['playing'])
-        self.assertEqual(radio.snapshot()['queue_count'], 3)
+        self.assertEqual([t['id'] for t in radio.snapshot()['queue'][:3]], [1,2,3])
         radio.control('seek', {'position':3})
         self.assertEqual(radio.snapshot()['position'], 3)
         self.assertEqual(radio.control('next', {})['current']['id'], 2)
