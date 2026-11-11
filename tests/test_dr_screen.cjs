@@ -17,7 +17,7 @@ async function pageTest(blocked) {
     createMediaElementSource(p){assert.equal(p,elements.player);return node('player');},
     createAnalyser(){return analyser;},createGain(){return gain;},resume(){return Promise.resolve();},addEventListener(){}};
   const window = {AudioContext: function(){return context;},addEventListener(){},EventBridge:{scriptEventReceived:{connect(f){receive=f;}},emitWebEvent(raw){messages.push(JSON.parse(raw));}}};
-  vm.runInNewContext(code,{window,document:{getElementById:id=>elements[id],createElement:element},setInterval(){return 1;},clearInterval(){}});
+  vm.runInNewContext(code,{window,document:{getElementById:id=>elements[id],createElement:element},setInterval(){return 1;},clearInterval(){},setTimeout,clearTimeout});
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(edges,[['player','analyser'],['analyser','gain'],['gain','speaker']]);
   assert.equal(window.playerAudio.analyser,analyser);
