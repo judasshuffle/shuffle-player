@@ -11,7 +11,7 @@ VISUALIZER_BANKS = {
     'Default': ['Tempest MVP', 'Hot & Zappy', 'Slow Phosphor'],
     'Minimal': ['Wireframe Clean'],
     'VLM': ['Minter 01 (Tunnel)', 'Minter 02 (Rings)', 'Minter 03 (Burst)',
-            'Minter 04 (Clean Rings)', 'Kevs Fractal Tree', 'Tempest Bonus Pyramids'],
+            'Minter 04 (Clean Rings)', 'Kevs Fractal Tree', 'Tempest Bonus Pyramids', 'Echo Loom'],
 }
 
 
@@ -212,6 +212,17 @@ class LibraryRadio:
                 self.kinds[insertion:insertion] = ['request'] * len(payload['ids'])
                 if self.index < 0: self.index = 0
                 self.top_up()
+                interrupt = False
+            elif action == 'visualizer':
+                bank = payload.get('bank', self.visualizer_bank)
+                preset = payload.get('preset')
+                if bank not in VISUALIZER_BANKS or preset not in VISUALIZER_BANKS[bank]:
+                    raise ValueError('Unknown visualizer preset.')
+                if self.index < 0:
+                    raise ValueError('There is no current track.')
+                self.visualizer_bank = bank
+                self.visual_track_id = self.ids[self.index]
+                self.visual_preset = preset
                 interrupt = False
             elif action == 'toggle':
                 self.offset = elapsed

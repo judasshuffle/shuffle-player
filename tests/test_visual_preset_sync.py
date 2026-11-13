@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'synology'))
-from radio import LibraryRadio
+from radio import LibraryRadio, VISUALIZER_BANKS
 
 
 class FixtureLibrary:
@@ -29,6 +29,17 @@ class FixtureLibrary:
 
 
 class VisualPresetSyncTests(unittest.TestCase):
+    def test_vlm_bank_includes_echo_loom(self):
+        self.assertIn('Echo Loom', VISUALIZER_BANKS['VLM'])
+
+    def test_owner_can_select_echo_loom_for_current_song(self):
+        radio = self.make_radio()
+        radio.control('visualizer', {'bank': 'VLM', 'preset': 'Echo Loom'})
+        current = radio.snapshot()
+        self.assertEqual(current['visualizer'], {'bank': 'VLM', 'preset': 'Echo Loom'})
+        next_state = radio.control('next', {})
+        self.assertNotEqual(next_state['visualizer']['preset'], 'Echo Loom')
+
     def make_radio(self):
         radio = LibraryRadio(FixtureLibrary(), target_seconds=600, start_paused=True,
                              visualizer_bank='Default')

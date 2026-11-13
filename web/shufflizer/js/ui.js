@@ -73,6 +73,11 @@ export function initUI() {
     spawn: 2,
     shockwave: 1.0,
     beatThresh: 1.25,
+    echoDecay: 2.4,
+    echoBassStretch: 1.7,
+    echoSeamGain: 1.0,
+    echoOffset: 14,
+    echoRotation: 0.018,
 
     // selection
     bank: "Default",
@@ -108,6 +113,11 @@ export function initUI() {
     els.spawn.value = String(params.spawn ?? els.spawn.value);
     els.shockwave.value = String(params.shockwave ?? els.shockwave.value);
     els.beatThresh.value = String(params.beatThresh ?? els.beatThresh.value);
+    state.echoDecay = Number(params.echoDecay ?? state.echoDecay);
+    state.echoBassStretch = Number(params.echoBassStretch ?? state.echoBassStretch);
+    state.echoSeamGain = Number(params.echoSeamGain ?? state.echoSeamGain);
+    state.echoOffset = Number(params.echoOffset ?? state.echoOffset);
+    state.echoRotation = Number(params.echoRotation ?? state.echoRotation);
 
     els.glow.checked = !!params.glow;
     els.phosphor.checked = !!params.phosphor;

@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:visual-sync-20261113-vlm-debug
+    image: shuffle-player:echo-loom-20261113
     build:
       context: .
       dockerfile: synology/Dockerfile

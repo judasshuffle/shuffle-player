@@ -358,8 +358,8 @@ export function startEngine(canvas, analyser, uiState) {
 
     // Overlay: now playing (disabled; title uses particles)
 
-    // Global overlays
-    drawOverlays(ctx, w, h, t, audio, uiState);
+    // Echo Loom owns the full frame so silence can decay cleanly to black.
+    if (uiState.effectId !== "echoLoom") drawOverlays(ctx, w, h, t, audio, uiState);
   }
 
   requestAnimationFrame((t) => {
