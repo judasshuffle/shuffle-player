@@ -225,7 +225,9 @@ export function startEngine(canvas, analyser, uiState) {
       life: 1.0,
       drift: 0.8 + Math.random() * 1.4,
       vr: (Math.random() - 0.5) * 1.8,
-      va: 0.010 + Math.random() * 0.018,
+      // Keep the title readable while it orbits; audio still adds a little
+      // life without making the text whip around the screen.
+      va: 0.005 + Math.random() * 0.009,
       size: 32 + Math.random() * 20,
     });
 
@@ -239,7 +241,7 @@ export function startEngine(canvas, analyser, uiState) {
     ctx.save();
     for (let i = titleParticles.length - 1; i >= 0; i--) {
       const p = titleParticles[i];
-      p.angle += (p.va ?? 0.02) + energy * 0.010;
+      p.angle += (p.va ?? 0.01) + energy * 0.004;
       p.vr = (p.vr ?? 0) + (energy * 0.10 - 0.02);   // audio pushes out a bit
       p.vr += (Math.random() - 0.5) * 0.12;           // gentle wander
       p.radius += p.vr;

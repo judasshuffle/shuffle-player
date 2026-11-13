@@ -26,6 +26,15 @@ const audioEl = document.getElementById("audio");
 audioEl.load();
 
 const ui = initUI();
+// Shared by the dashboard and the DarkRide screen wrapper.  The engine owns
+// title-change detection and particle timing; callers only provide metadata.
+window.SHUF_setTrackTitle = function (title) {
+  const next = (title || "").toString().trim();
+  if (ui.state.trackTitle === next) return;
+  ui.state.trackTitle = next;
+  const el = document.getElementById("npTextUi");
+  if (el) el.textContent = next;
+};
 // --- SHUFFLIZER_PALETTE_CORE ---
 window.SHUF_PRESETS = window.SHUF_PRESETS || {"Phosphor Prime":{"primary":"rgba(0,255,102,0.95)","accent":"rgba(102,255,208,0.90)","glow":"rgba(0,170,68,0.90)","glowFill":"rgba(0,170,68,0.25)","tint":0.65},"Ember Grid":{"primary":"rgba(255,146,0,0.95)","accent":"rgba(255,205,115,0.90)","glow":"rgba(215,123,95,0.90)","glowFill":"rgba(215,123,95,0.25)","tint":0.65},"Copper Pulse":{"primary":"rgba(241,142,63,0.95)","accent":"rgba(229,149,121,0.90)","glow":"rgba(193,76,50,0.90)","glowFill":"rgba(193,76,50,0.25)","tint":0.65},"Overdrive":{"primary":"rgba(255,197,0,0.95)","accent":"rgba(236,65,11,0.90)","glow":"rgba(179,0,25,0.90)","glowFill":"rgba(179,0,25,0.25)","tint":0.7},"Midnight Alloy":{"primary":"rgba(255,164,0,0.95)","accent":"rgba(108,52,0,0.90)","glow":"rgba(65,34,42,0.90)","glowFill":"rgba(65,34,42,0.25)","tint":0.7},"Analog Drift":{"primary":"rgba(255,205,135,0.95)","accent":"rgba(188,117,118,0.90)","glow":"rgba(105,107,126,0.90)","glowFill":"rgba(105,107,126,0.25)","tint":0.6}};
 
@@ -226,7 +235,7 @@ startEngine(canvas, audio.analyser, ui.state);
 startNowPlaying({
   host: window.location.hostname,
   intervalMs: 2000,
-  onUpdate: (title) => { ui.state.trackTitle = title; const el = document.getElementById("npTextUi"); if (el) el.textContent = title; spawnTitleParticle(title); },
+  onUpdate: (title) => { window.SHUF_setTrackTitle(title); },
 });
 
 // SHUFFLIZER_AUTOHIDE_UI

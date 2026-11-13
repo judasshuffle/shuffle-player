@@ -43,7 +43,7 @@ frame.src = '/visualizer/index.html?embed=1';
 frame.title = 'Shufflizer live MP3';
 frame.allow = 'autoplay';
 document.getElementById('visualizer').append(frame);
-let stationVersion = 0, visualTrackId = null, manualVisual = null, appliedVisualKey = '';
+let stationVersion = 0, visualTrackId = null, titleTrackId = null, manualVisual = null, appliedVisualKey = '';
 let stationVisual = null, rendererVisual = null;
 const MANUAL_VISUAL_KEY = 'shufflizer.screen.manual-preset';
 function readManualVisual(trackId) {
@@ -63,9 +63,21 @@ function showPresetDebug() {
   const renderer = rendererVisual ? `${rendererVisual.bank} / ${rendererVisual.preset} (${rendererVisual.effectId})` : 'waiting';
   presetDebug.textContent = `Station preset: ${station} · Renderer preset: ${renderer}`;
 }
+function applyStationTitle(station) {
+  const track = station?.current;
+  const trackId = track?.id;
+  if (!trackId || trackId === titleTrackId || !frame.contentWindow?.SHUF_setTrackTitle) return;
+  const artist = (track.artist || '').toString().trim();
+  const title = (track.title || '').toString().trim();
+  const text = artist && title ? `${artist} — ${title}` : (title || artist || '');
+  if (!text) return;
+  titleTrackId = trackId;
+  frame.contentWindow.SHUF_setTrackTitle(text);
+}
 function applyStationVisual(station) {
   const trackId = station?.current?.id;
   const visual = station?.visualizer;
+  applyStationTitle(station);
   if (!trackId || !visual?.bank || !visual?.preset || !frame.contentWindow?.SHUF_setSelection) return;
   stationVisual = {bank: visual.bank, preset: visual.preset};
   showPresetDebug();
