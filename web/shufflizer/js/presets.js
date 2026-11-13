@@ -16,7 +16,7 @@ phosphor: true,
 },
 {
 name: "Hot & Zappy",
-effectId: "tempestTunnel",
+effectId: "ringShock",
 params: {
 spin: 2.2,
 trail: 0.06,
@@ -30,7 +30,7 @@ phosphor: true,
 },
 {
 name: "Slow Phosphor",
-effectId: "tempestTunnel",
+effectId: "vectorBurst",
 params: {
 spin: 0.8,
 trail: 0.05,

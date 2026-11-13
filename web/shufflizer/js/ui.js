@@ -129,13 +129,21 @@ export function initUI() {
     els.preset.value = state.preset;
   }
 
-  function applySelectedPreset() {
+  function reportSelection(source = "manual") {
+    const detail = {bank: els.bank.value, preset: els.preset.value, effectId: state.effectId, source};
+    window.SHUF_rendererPreset = detail;
+    window.dispatchEvent(new CustomEvent("shufflizer:preset-applied", {detail}));
+  }
+
+  function applySelectedPreset(source = "manual") {
     const p = getPreset(els.bank.value, els.preset.value);
     if (!p) return;
     writeToControls(p);
+    reportSelection(source);
   }
 
-  function setSelection(bankName, presetName) {
+  function setSelection(bankName, presetName, options = {}) {
+    const source = typeof options === "string" ? options : (options.source || "manual");
     if (bankName && els.bank.value !== bankName) {
       els.bank.value = bankName;
       state.bank = bankName;
@@ -145,7 +153,12 @@ export function initUI() {
       els.preset.value = presetName;
       state.preset = presetName;
     }
-    applySelectedPreset();
+    applySelectedPreset(source);
+    if (source === "manual") {
+      window.dispatchEvent(new CustomEvent("shufflizer:preset-manual", {
+        detail: {bank: els.bank.value, preset: els.preset.value},
+      }));
+    }
   }
 
   function nextPreset(dir = +1) {
@@ -154,7 +167,7 @@ export function initUI() {
     const cur = els.preset.value;
     const idx = Math.max(0, opts.indexOf(cur));
     const nextIdx = (idx + dir + opts.length) % opts.length;
-    setSelection(els.bank.value, opts[nextIdx]);
+    setSelection(els.bank.value, opts[nextIdx], {source: "manual"});
   }
 
   function randomPreset() {
@@ -164,7 +177,7 @@ export function initUI() {
     const presets = listPresets(b);
     if (!presets.length) return;
     const p = presets[Math.floor(Math.random() * presets.length)];
-    setSelection(b, p);
+    setSelection(b, p, {source: "manual"});
   }
 
   function mutate(intensity = 0.35) {
@@ -188,17 +201,23 @@ export function initUI() {
   repopulatePresetSelect(state.bank);
 
   els.muted.checked = true;
-  applySelectedPreset();
+  applySelectedPreset("initial");
 
   els.bank.addEventListener("change", () => {
     state.bank = els.bank.value;
     repopulatePresetSelect(state.bank);
-    applySelectedPreset();
+    applySelectedPreset("manual");
+    window.dispatchEvent(new CustomEvent("shufflizer:preset-manual", {
+      detail: {bank: els.bank.value, preset: els.preset.value},
+    }));
   });
 
   els.preset.addEventListener("change", () => {
     state.preset = els.preset.value;
-    applySelectedPreset();
+    applySelectedPreset("manual");
+    window.dispatchEvent(new CustomEvent("shufflizer:preset-manual", {
+      detail: {bank: els.bank.value, preset: els.preset.value},
+    }));
   });
 
   Object.values(els).forEach(el => {
@@ -209,6 +228,8 @@ export function initUI() {
   });
 
   readFromControls();
+  window.SHUF_setSelection = (bankName, presetName, source = "manual") =>
+    setSelection(bankName, presetName, {source});
 
   
   // --- Overlays wiring (safe inside initUI) ---

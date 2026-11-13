@@ -3,6 +3,7 @@ const player = document.getElementById('player');
 const status = document.getElementById('status');
 const button = document.getElementById('start');
 const volumeSlider = document.getElementById('volume');
+const presetDebug = document.getElementById('presetDebug');
 const context = new (window.AudioContext || window.webkitAudioContext)();
 const source = context.createMediaElementSource(player);
 const analyser = context.createAnalyser();
@@ -42,6 +43,72 @@ frame.src = '/visualizer/index.html?embed=1';
 frame.title = 'Shufflizer live MP3';
 frame.allow = 'autoplay';
 document.getElementById('visualizer').append(frame);
+let stationVersion = 0, visualTrackId = null, manualVisual = null, appliedVisualKey = '';
+let stationVisual = null, rendererVisual = null;
+const MANUAL_VISUAL_KEY = 'shufflizer.screen.manual-preset';
+function readManualVisual(trackId) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(MANUAL_VISUAL_KEY) || 'null');
+    return saved && saved.trackId === trackId ? saved : null;
+  } catch (_) { return null; }
+}
+function writeManualVisual(detail) {
+  manualVisual = {trackId: visualTrackId, bank: detail.bank, preset: detail.preset};
+  appliedVisualKey = `${visualTrackId}|${detail.bank}|${detail.preset}`;
+  try { localStorage.setItem(MANUAL_VISUAL_KEY, JSON.stringify(manualVisual)); } catch (_) {}
+}
+function showPresetDebug() {
+  if (!presetDebug) return;
+  const station = stationVisual ? `${stationVisual.bank} / ${stationVisual.preset}` : 'waiting';
+  const renderer = rendererVisual ? `${rendererVisual.bank} / ${rendererVisual.preset} (${rendererVisual.effectId})` : 'waiting';
+  presetDebug.textContent = `Station preset: ${station} · Renderer preset: ${renderer}`;
+}
+function applyStationVisual(station) {
+  const trackId = station?.current?.id;
+  const visual = station?.visualizer;
+  if (!trackId || !visual?.bank || !visual?.preset || !frame.contentWindow?.SHUF_setSelection) return;
+  stationVisual = {bank: visual.bank, preset: visual.preset};
+  showPresetDebug();
+  if (trackId !== visualTrackId) {
+    visualTrackId = trackId;
+    manualVisual = readManualVisual(trackId);
+    appliedVisualKey = '';
+    if (!manualVisual) {
+      try { localStorage.removeItem(MANUAL_VISUAL_KEY); } catch (_) {}
+    }
+  }
+  if (manualVisual?.trackId === trackId) {
+    const key = `${trackId}|${manualVisual.bank}|${manualVisual.preset}`;
+    if (key !== appliedVisualKey) {
+      frame.contentWindow.SHUF_setSelection(manualVisual.bank, manualVisual.preset, 'restore');
+      appliedVisualKey = key;
+    }
+  } else {
+    const key = `${trackId}|${visual.bank}|${visual.preset}`;
+    if (key !== appliedVisualKey) {
+      frame.contentWindow.SHUF_setSelection(visual.bank, visual.preset, 'auto');
+      appliedVisualKey = key;
+    }
+    rendererVisual = frame.contentWindow.SHUF_rendererPreset || null;
+    showPresetDebug();
+  }
+}
+async function pollStationVisual() {
+  try {
+    const response = await fetch('/api/station?since=' + stationVersion);
+    if (response.ok) {
+      const station = await response.json();
+      stationVersion = station.version || stationVersion;
+      applyStationVisual(station);
+    }
+  } catch (_) {}
+  setTimeout(pollStationVisual, 1000);
+}
+frame.addEventListener('load', () => {
+  try { frame.contentWindow.addEventListener('shufflizer:preset-manual', event => writeManualVisual(event.detail || {})); } catch (_) {}
+  try { frame.contentWindow.addEventListener('shufflizer:preset-applied', event => { rendererVisual = event.detail || null; showPresetDebug(); }); } catch (_) {}
+  if (typeof fetch === 'function') pollStationVisual();
+});
 function showState() {
   const playing = !player.paused && context.state === 'running';
   status.textContent = playing ? `Live screen audio · volume ${volume}%` :

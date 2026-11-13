@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:rolling-shuffle-20261111
+    image: shuffle-player:visual-sync-20261113-vlm-debug
     build:
       context: .
       dockerfile: synology/Dockerfile
@@ -13,6 +13,7 @@ services:
       PUBLIC_LISTENING_BASE: http://shuffle.tplinkdns.com:8001
       SHUFFLE_OWNER_KEY_FILE: /run/shuffle-owner/owner-key
       SHUFFLE_START_PAUSED: "0"
+      SHUFFLE_VISUALIZER_BANK: VLM
     volumes:
       - type: bind
         source: /volume1/docker/shuffle-player/secrets

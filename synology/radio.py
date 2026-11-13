@@ -7,9 +7,17 @@ import time
 import math
 from collections import deque
 
+VISUALIZER_BANKS = {
+    'Default': ['Tempest MVP', 'Hot & Zappy', 'Slow Phosphor'],
+    'Minimal': ['Wireframe Clean'],
+    'VLM': ['Minter 01 (Tunnel)', 'Minter 02 (Rings)', 'Minter 03 (Burst)',
+            'Minter 04 (Clean Rings)', 'Kevs Fractal Tree', 'Tempest Bonus Pyramids'],
+}
+
 
 class LibraryRadio:
-    def __init__(self, library, binary='ffmpeg', listener_limit=16, target_seconds=3600, start_paused=False):
+    def __init__(self, library, binary='ffmpeg', listener_limit=16, target_seconds=3600,
+                 start_paused=False, visualizer_bank='Default'):
         self.library, self.binary, self.listener_limit = library, binary, listener_limit
         self.condition = threading.Condition()
         self.listeners = set()
@@ -30,6 +38,9 @@ class LibraryRadio:
         self.version = self.generation = 1
         self.info_cache = {}
         self.error = ''
+        self.visualizer_bank = visualizer_bank if visualizer_bank in VISUALIZER_BANKS else 'Default'
+        self.visual_track_id = None
+        self.visual_preset = None
         self.top_up()
         if self.ids: self.index = 0
         self.playing = bool(self.ids) and not start_paused
@@ -104,6 +115,14 @@ class LibraryRadio:
     def position(self):
         return self.offset + (time.monotonic() - self.started if self.playing else 0)
 
+    def ensure_visual_preset(self, ident):
+        if ident == self.visual_track_id:
+            return
+        options = VISUALIZER_BANKS[self.visualizer_bank]
+        choices = [name for name in options if name != self.visual_preset] or options
+        self.visual_track_id = ident
+        self.visual_preset = random.choice(choices) if ident is not None and choices else None
+
     def advance(self):
         if self.index >= 0: self.recent.append(self.ids[self.index])
         if self.index + 1 < len(self.ids):
@@ -136,10 +155,12 @@ class LibraryRadio:
         with self.condition:
             self.settle()
             current = self.info(self.ids[self.index]).copy() if self.index >= 0 else None
+            self.ensure_visual_preset(current['id'] if current else None)
             state = {'version':self.version, 'index':self.index, 'playing':self.playing,
                      'position':self.position(), 'current':current, 'queue_count':len(self.ids),
                      'listeners':len(self.listeners), 'error':self.error,
                      'mode':self.mode, 'filter_query':self.filter_query,
+                     'visualizer': {'bank':self.visualizer_bank, 'preset':self.visual_preset},
                      'queued_seconds':sum(self.length(ident) for ident in self.ids[max(0,self.index):]) - (self.position() if self.index >= 0 else 0)}
             if since != self.version:
                 start = max(0, self.index - 10)

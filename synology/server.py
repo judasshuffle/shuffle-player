@@ -697,7 +697,8 @@ if __name__ == "__main__":
     Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
     Handler.mp3_cache = Mp3Cache(os.environ.get('PLAYBACK_CACHE', '/cache'), os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
     Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'),
-                                start_paused=os.environ.get('SHUFFLE_START_PAUSED') == '1')
+                                start_paused=os.environ.get('SHUFFLE_START_PAUSED') == '1',
+                                visualizer_bank=os.environ.get('SHUFFLE_VISUALIZER_BANK', 'Default'))
     key_file = os.environ.get('SHUFFLE_OWNER_KEY_FILE')
     Handler.owner_auth = OwnerAuth(Path(key_file).read_text().strip() if key_file else '')
     class LanHandler(Handler):
