@@ -1,5 +1,20 @@
 # Synology browser player
 
+## DarkRide music feed and lighting integration
+
+The existing `/dr-screen` now exposes a bounded music-analysis feed through its
+Web/EventBridge connection. It reuses the current audio stream and source, with
+optional publication by one selected viewer for shared music-reactive lighting.
+See [MUSIC-FEED.md](MUSIC-FEED.md) for the schema, opt-out, tests and scoped
+deployment/queue recovery. The separate [lighting repository](https://github.com/judasshuffle/lighting)
+contains the dance hall rig, MIDI controls and ten-preset LIGHTS desk.
+
+The recovery helper preserves the ordered station queue, playback position,
+programme/filter and visualizer selection. Public station responses continue
+to omit owner queue details. Publishing this source does not run a deployment.
+
+## Earlier station checkpoints
+
 Current queue behaviour and disposable-queue deployment:
 [ROLLING-SHUFFLE.md](ROLLING-SHUFFLE.md).
 

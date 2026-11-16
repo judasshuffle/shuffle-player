@@ -23,6 +23,8 @@
 !synology/dr-screen.html
 !synology/dr-screen.js
 !synology/dr-screen-entity.js
+!synology/music-features.js
+!synology/music-telemetry.js
 !synology/dr-remote.html
 !synology/dr-remote.js
 !synology/dr-dj.js

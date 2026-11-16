@@ -131,7 +131,8 @@ class LibraryRadio:
             self.ids, self.kinds, self.index = [], [], -1
         self.offset, self.started = 0.0, time.monotonic()
         self.top_up()
-        if self.mode == 'album' and 'request' not in self.kinds[max(0,self.index):]:
+        if self.mode == 'album' and not any(kind in ('request', 'recovered')
+                                          for kind in self.kinds[max(0,self.index):]):
             self.mode = 'library'
         if self.index < 0: self.playing = False
         self.version += 1
@@ -166,6 +167,7 @@ class LibraryRadio:
                 start = max(0, self.index - 10)
                 state['queue_start'] = start
                 state['queue'] = [self.info(ident).copy() for ident in self.ids[start:start+100]]
+                state['queue_kinds'] = self.kinds[start:start+100].copy()
             return state
 
     def validate_ids(self, ids):
@@ -182,6 +184,41 @@ class LibraryRadio:
 
     def control(self, action, payload):
         if action in ('replace', 'append', 'program'): self.validate_ids(payload.get('ids'))
+        # Signed owner-only deployment recovery: restore the ordered queue without
+        # silently turning an existing filtered mix into a full-library shuffle.
+        # Validate the optional hint before any playback/queue mutation.
+        resume = payload.get('resume_program')
+        resume_pool = None
+        resume_kinds = None
+        resume_index, resume_position = 0, 0.0
+        if resume is not None:
+            if action != 'replace' or not isinstance(resume, dict):
+                raise ValueError('Invalid programme recovery')
+            mode, query = resume.get('mode'), resume.get('query', '')
+            if mode not in ('library', 'filter', 'album') or not isinstance(query, str) or len(query) > 200:
+                raise ValueError('Invalid programme recovery')
+            if mode == 'filter':
+                resume_pool, album = self.library.program(query)
+                if album or not resume_pool: raise ValueError('Filtered programme unavailable')
+            else:
+                resume_pool = list(self.catalog)
+            if 'kinds' in resume:
+                kinds = resume['kinds']
+                if (not isinstance(kinds, list) or len(kinds) != len(payload['ids']) or
+                        any(kind not in ('request', 'random', 'recovered') for kind in kinds)):
+                    raise ValueError('Invalid recovery queue kinds')
+                resume_kinds = kinds.copy()
+            else:
+                # Old snapshots cannot tell requests from generated selections.
+                resume_kinds = ['recovered'] * len(payload['ids'])
+            # Restore the cursor together with kinds: starting at zero and then
+            # selecting would trim a captured random tail against the wrong hour.
+            resume_index = resume.get('index', 0)
+            resume_position = resume.get('position', 0.0)
+            if (type(resume_index) is not int or not 0 <= resume_index < len(payload['ids']) or
+                    type(resume_position) not in (int, float) or
+                    not 0 <= resume_position <= 86400):
+                raise ValueError('Invalid recovery playback position')
         self.start()
         with self.condition:
             self.settle()
@@ -193,9 +230,17 @@ class LibraryRadio:
                 self.pool = list(payload['ids']) if action == 'program' and not payload.get('album') else list(self.catalog)
                 self.mode = 'album' if payload.get('album') else ('filter' if action == 'program' else 'library')
                 self.filter_query = payload.get('query','') if action == 'program' else ''
+                if resume is not None:
+                    self.mode, self.filter_query = resume['mode'], resume.get('query', '')
+                    self.pool = resume_pool
                 self.ids = payload['ids'].copy() if action == 'replace' or payload.get('album') else []
                 self.kinds = ['request'] * len(self.ids)
                 self.index, self.offset, self.playing = (0 if self.ids else -1), 0.0, True
+                if resume is not None:
+                    self.kinds = resume_kinds
+                    self.index = resume_index
+                    duration = float(self.info(self.ids[self.index]).get('duration') or 0)
+                    self.offset = min(float(resume_position), max(0, duration - .05)) if duration else float(resume_position)
                 self.started = time.monotonic()
                 self.top_up()
                 self.playing = bool(self.ids)

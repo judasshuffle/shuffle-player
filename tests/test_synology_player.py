@@ -38,7 +38,7 @@ class PlayerTests(unittest.TestCase):
             self.assertIn(b'src="/stream.mp3"', body)
             self.assertNotIn(b'/station.js', body)
             self.assertNotIn(b'<!-- SHUFFLIZER_CONTROLS -->', body)
-        for path in ('/dr-screen.js', '/dr-screen-entity.js'):
+        for path in ('/dr-screen.js', '/dr-screen-entity.js', '/music-features.js', '/music-telemetry.js'):
             status, headers, body = self.request(path)
             self.assertEqual(status, 200)
             self.assertIn('javascript', headers['Content-Type'])
@@ -199,6 +199,39 @@ class PlayerTests(unittest.TestCase):
         restarted=server.OwnerAuth('a'*64)
         self.assertFalse(restarted.verify('GET','/api/station',headers))
         self.assertFalse(auth.verify('GET','/api/different',headers))
+
+    def test_recovery_queue_kinds_owner_only_and_signed_validation(self):
+        handler = self.httpd.RequestHandlerClass
+        saved = handler.radio.snapshot()
+        public = json.loads(self.request('/api/station')[2])
+        for key in ('queue', 'queue_start', 'queue_kinds'):
+            self.assertNotIn(key, public)
+        owner = json.loads(self.request('/api/station', headers=self.sign('GET', '/api/station'))[2])
+        self.assertEqual(owner['queue_kinds'], saved['queue_kinds'])
+        self.assertEqual(len(owner['queue_kinds']), len(owner['queue']))
+
+        def recover(kinds, signed=True):
+            body = json.dumps({'action':'replace', 'ids':[1, 2],
+                               'resume_program':{'mode':'library', 'kinds':kinds}}).encode()
+            headers = {'Content-Type':'application/json'}
+            if signed:
+                headers.update(self.sign('POST', '/api/station/control', body))
+            client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=5)
+            try:
+                client.request('POST', '/api/station/control', body, headers)
+                response = client.getresponse()
+                return response.status, response.read()
+            finally:
+                client.close()
+
+        version = handler.radio.version
+        self.assertEqual(recover(['recovered', 'request'], signed=False)[0], 403)
+        self.assertEqual(recover(['random'])[0], 400)
+        self.assertEqual(handler.radio.version, version)
+        status, body = recover(['recovered', 'request'])
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['queue_kinds'][:2], ['recovered', 'request'])
+        self.assertNotIn('queue_kinds', json.loads(self.request('/api/station')[2]))
 
     @unittest.skipUnless(shutil.which('ffmpeg'), 'ffmpeg required')
     def test_station_controls_keep_existing_stream_connection(self):

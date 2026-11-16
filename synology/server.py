@@ -405,7 +405,7 @@ class Handler(SimpleHTTPRequestHandler):
         state = self.radio.snapshot(since)
         state['can_control'] = owner
         if not owner:
-            for key in ('queue', 'queue_start'): state.pop(key, None)
+            for key in ('queue', 'queue_start', 'queue_kinds'): state.pop(key, None)
         return state
 
     def trusted_control_host(self):
@@ -558,7 +558,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.content(text, 'text/html; charset=utf-8')
         if path in ('/dr-remote', '/dr-remote/'):
             return self.content((HERE / 'dr-remote.html').read_bytes(), 'text/html; charset=utf-8')
-        if path in ('/dr-screen.js', '/dr-screen-entity.js', '/dr-dj.js', '/dr-remote.js', '/owner.js', '/sha256.js'):
+        if path in ('/dr-screen.js', '/dr-screen-entity.js', '/music-features.js', '/music-telemetry.js', '/dr-dj.js', '/dr-remote.js', '/owner.js', '/sha256.js'):
             return self.content((HERE / path.lstrip('/')).read_bytes(), 'text/javascript')
         if path in ("/", "/app.js", "/palette.js", "/station.js"):
             if not self.control_access and path != '/palette.js':

@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:echo-loom-20261113
+    image: shuffle-player:music-feed-20261116
     build:
       context: .
       dockerfile: synology/Dockerfile

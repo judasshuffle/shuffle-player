@@ -45,6 +45,7 @@ frame.allow = 'autoplay';
 document.getElementById('visualizer').append(frame);
 let stationVersion = 0, visualTrackId = null, titleTrackId = null, manualVisual = null, appliedVisualKey = '';
 let stationVisual = null, rendererVisual = null;
+let musicTrack = null;
 const MANUAL_VISUAL_KEY = 'shufflizer.screen.manual-preset';
 function readManualVisual(trackId) {
   try {
@@ -75,6 +76,7 @@ function applyStationTitle(station) {
   frame.contentWindow.SHUF_setTrackTitle(text);
 }
 function applyStationVisual(station) {
+  musicTrack = station?.current || null;
   const trackId = station?.current?.id;
   const visual = station?.visualizer;
   applyStationTitle(station);
@@ -185,6 +187,10 @@ function connectBridge() {
   });
   bridge.emitWebEvent(JSON.stringify({hello: true}));
   if (visualizerReady) bridge.emitWebEvent(JSON.stringify({ready: true}));
+  // Optional sidecar: failure must not interrupt the established audio graph.
+  try {
+    window.ShufflizerMusic?.attach({context, source, player, bridge, track: () => musicTrack});
+  } catch (error) { console.warn('Shufflizer music telemetry unavailable', error); }
 }
 bridgeTimer = setInterval(connectBridge, 100);
 connectBridge();

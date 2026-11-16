@@ -17,6 +17,7 @@ def load(name, filename):
     return module
 server = load('program_server', 'server.py')
 radio = load('program_radio', 'radio.py')
+deployment = load('music_deployment', 'deploy-music-feed.py')
 
 class QuietRadio(radio.LibraryRadio):
     def start(self): pass
@@ -72,6 +73,158 @@ class ProgrammingTests(unittest.TestCase):
             following=self.station.ids[self.station.index+1]
             self.assertNotEqual(self.station.catalog[current]['album'],self.station.catalog[following]['album'])
             self.station.advance()
+
+    def test_owner_recovery_preserves_queue_and_filter(self):
+        query = 'play 70s Bob Dylan'
+        ids, album = self.library.program(query)
+        saved = [ids[5], ids[3], ids[9], ids[1]]
+        self.station.control('replace', {'ids':saved, 'resume_program':{'mode':'filter', 'query':query}})
+        self.assertEqual(self.station.ids[:4], saved)
+        self.assertEqual(self.station.mode, 'filter')
+        self.assertEqual(self.station.filter_query, query)
+        self.assertEqual(set(self.station.pool), set(ids))
+        for _ in range(30):
+            self.assertTrue(set(self.station.ids[self.station.index:]) <= set(ids))
+            self.station.advance()
+        previous = self.station.ids.copy()
+        with self.assertRaises(ValueError):
+            self.station.control('replace', {'ids':saved, 'resume_program':{'mode':'invalid'}})
+        self.assertEqual(self.station.ids, previous)
+
+    def test_recovery_snapshot_kinds_follow_queue_slice(self):
+        for _ in range(14):
+            self.station.advance()
+        saved = self.station.snapshot()
+        start = saved['queue_start']
+        self.assertEqual(saved['queue_kinds'], self.station.kinds[start:start+100])
+        self.assertEqual(len(saved['queue_kinds']), len(saved['queue']))
+        saved['queue_kinds'][0] = 'recovered'
+        self.assertNotEqual(self.station.kinds[start], 'recovered', 'Snapshot must be a copy')
+        unchanged = self.station.snapshot(since=saved['version'])
+        self.assertNotIn('queue', unchanged)
+        self.assertNotIn('queue_kinds', unchanged)
+
+    def test_recovery_captured_kinds_and_cursor_preserve_request_priority(self):
+        query = 'play 70s Bob Dylan'
+        ids, _ = self.library.program(query)
+        self.station.control('program', {'ids':ids, 'query':query})
+        for _ in range(7):
+            self.station.advance()
+        self.station.control('append', {'ids':[119]})
+        self.station.control('seek', {'position':200})
+        self.station.control('toggle', {})
+        saved = self.station.snapshot()
+        self.assertIn('random', saved['queue_kinds'])
+        self.assertIn('request', saved['queue_kinds'])
+        deployment.restore(saved, lambda action, **payload: self.station.control(action, payload))
+        restored = self.station.snapshot()
+        self.assertEqual(deployment.verify_recovery(saved, restored), [])
+        self.assertAlmostEqual(restored['position'], saved['position'], places=3)
+        self.station.control('append', {'ids':[120]})
+        self.assertEqual(self.station.ids[self.station.index+1:self.station.index+3], [119, 120])
+        self.assertFalse(self.station.playing)
+
+    def test_recovery_unknown_kinds_retain_tracks_behind_new_requests(self):
+        saved = [1, 2, 3, 4]
+        self.station.control('replace', {'ids':saved, 'resume_program':{'mode':'library'}})
+        self.assertEqual(self.station.kinds[:4], ['recovered'] * 4)
+        self.station.control('append', {'ids':[119]})
+        self.station.control('append', {'ids':[120]})
+        self.assertEqual(self.station.ids[:6], [1, 119, 120, 2, 3, 4])
+        self.assertEqual(self.station.kinds[:6], ['recovered', 'request', 'request'] + ['recovered'] * 3)
+        saved_state = self.station.snapshot()
+        saved_state.pop('queue_kinds')
+        deployment.restore(saved_state, lambda action, **payload: self.station.control(action, payload))
+        limitations = deployment.verify_recovery(saved_state, self.station.snapshot())
+        self.assertIn('not captured', limitations[0])
+
+    def test_recovery_unknown_album_finishes_before_library_fallback(self):
+        self.station.control('replace', {'ids':[1, 2, 3],
+                                        'resume_program':{'mode':'album', 'query':'saved album'}})
+        for ident in [1, 2, 3]:
+            self.assertEqual(self.station.mode, 'album')
+            self.assertEqual(self.station.ids[self.station.index], ident)
+            self.station.advance()
+        self.assertEqual(self.station.mode, 'library')
+        self.assertTrue(self.station.playing)
+
+    def test_recovery_invalid_kinds_or_cursor_do_not_mutate_station(self):
+        before = (self.station.ids.copy(), self.station.kinds.copy(), self.station.index,
+                  self.station.mode, self.station.pool.copy(), self.station.version)
+        for hint in ({'kinds':['random']}, {'kinds':['random', 'invented']},
+                     {'kinds':None}, {'kinds':'random'}, {'kinds':['random', {}]},
+                     {'index':True}, {'index':2}, {'position':float('nan')},
+                     {'position':float('inf')}, {'position':10**1000}, {'position':-1}):
+            with self.subTest(hint=hint), self.assertRaises(ValueError):
+                self.station.control('replace', {'ids':[1, 2],
+                                                'resume_program':dict(mode='library', **hint)})
+            self.assertEqual((self.station.ids, self.station.kinds, self.station.index,
+                              self.station.mode, self.station.pool, self.station.version), before)
+
+    def test_recovery_legacy_filter_reports_limitation_without_reprogramming(self):
+        query = 'play 70s Bob Dylan'
+        ids, _ = self.library.program(query)
+        self.station.control('program', {'ids':ids, 'query':query})
+        self.station.control('visualizer', {'bank':'VLM', 'preset':'Echo Loom'})
+        saved = self.station.snapshot()
+        saved.pop('queue_kinds')
+        actions = []
+
+        def old_control(action, **payload):
+            actions.append(action)
+            payload.pop('resume_program', None)
+            result = self.station.control(action, payload)
+            result.pop('queue_kinds', None)
+            return result
+
+        deployment.restore(saved, old_control)
+        final = self.station.snapshot()
+        final.pop('queue_kinds')
+        limitations = deployment.verify_recovery(saved, final, allow_legacy=True)
+        self.assertTrue(any('cannot retain the saved filter' in item for item in limitations))
+        self.assertNotIn('program', actions)
+        self.assertNotIn('shuffle', actions)
+        with self.assertRaisesRegex(RuntimeError, 'mode or filter'):
+            deployment.verify_recovery(saved, final)
+        for key, value in [('current', None), ('visualizer', {'bank':'Default', 'preset':'Tempest MVP'})]:
+            with self.subTest(key=key), self.assertRaises(RuntimeError):
+                deployment.verify_recovery(saved, dict(final, **{key:value}), allow_legacy=True)
+
+    def test_recovery_legacy_album_keeps_mode_and_intended_order(self):
+        self.station.control('replace', {'ids':[1, 2, 3], 'album':True})
+        self.station.control('visualizer', {'bank':'VLM', 'preset':'Echo Loom'})
+        saved = self.station.snapshot()
+        saved.pop('queue_kinds')
+
+        def old_control(action, **payload):
+            payload.pop('resume_program', None)
+            result = self.station.control(action, payload)
+            result.pop('queue_kinds', None)
+            return result
+
+        deployment.restore(saved, old_control)
+        final = self.station.snapshot()
+        final.pop('queue_kinds')
+        self.assertEqual(final['mode'], 'album')
+        self.assertTrue(deployment.verify_recovery(saved, final, allow_legacy=True))
+
+    def test_recovery_deployment_images_and_rollback_pin(self):
+        first, rollback = deployment.deployment_images(self.root/'incoming-music-feed-one')
+        second, _ = deployment.deployment_images(self.root/'incoming-music-feed-two')
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, rollback)
+        compose = self.root/'compose.yaml'
+        source = ('name: shuffle-player\nservices:\n  player:\n    image: shuffle-player:old\n'
+                  '    read_only: true\n  unrelated:\n    image: keep:this\n')
+        compose.write_text(deployment.compose_with_image(source, first))
+        self.assertIn('    image: ' + first, compose.read_text())
+        with patch.object(deployment.subprocess, 'run') as run:
+            deployment.pin_rollback_image('sha256:captured-old-image', rollback, compose)
+        run.assert_called_once_with([deployment.DOCKER, 'tag', 'sha256:captured-old-image', rollback], check=True)
+        self.assertEqual(compose.read_text(), deployment.compose_with_image(source, rollback))
+        self.assertIn('    image: keep:this', compose.read_text())
+        with self.assertRaises(ValueError):
+            deployment.compose_with_image('services:\n  unrelated:\n    image: keep:this\n', first)
 
     def test_requests_take_priority_and_pause_stays_paused(self):
         startup = QuietRadio(self.library, start_paused=True)

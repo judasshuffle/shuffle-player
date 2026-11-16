@@ -33,9 +33,9 @@ const server = http.createServer((request,response) => {
     response.writeHead(200,{'Content-Type':'text/html'});
     response.end(fs.readFileSync(path.join(root,'synology/dr-screen.html'),'utf8').replace('<!-- SHUFFLIZER_CONTROLS -->',''));return;
   }
-  if(url.pathname === '/dr-screen.js') {
+  if(['/dr-screen.js','/music-features.js','/music-telemetry.js'].includes(url.pathname)) {
     response.writeHead(200,{'Content-Type':'text/javascript'});
-    response.end(fs.readFileSync(path.join(root,'synology/dr-screen.js')));return;
+    response.end(fs.readFileSync(path.join(root,'synology',url.pathname.slice(1))));return;
   }
   // Rendering isn't under test; the real screen page and audio graph are.
   response.writeHead(200,{'Content-Type':'text/html'});response.end('<canvas></canvas>');
