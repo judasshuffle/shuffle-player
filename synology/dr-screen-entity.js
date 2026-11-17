@@ -1,5 +1,5 @@
 /* Client entity script. Cinema handshake, independent Shufflizer volume.
- * Attach to the Web entity whose sourceUrl is http://shuffle.tplinkdns.com:8001/dr-screen.
+ * Attach to the Web entity using this installation's /dr-screen address.
  */
 (function () {
     var VOLUME_SETTING = 'darkride/shufflizer/sound';

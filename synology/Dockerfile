@@ -11,6 +11,9 @@ COPY synology/dr-remote.html synology/dr-remote.js synology/dr-dj.js synology/ow
 COPY web/shufflizer/index.html /app/visualizer/index.html
 COPY web/shufflizer/css /app/visualizer/css
 COPY web/shufflizer/js /app/visualizer/js
+COPY synology/sources.py synology/sources.html synology/sources.js synology/connection.js /app/
+COPY scripts/update_index_sqlite.py /scripts/update_index_sqlite.py
+COPY src/config.py /src/config.py
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 USER 1026:100
 EXPOSE 8080 8081

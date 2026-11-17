@@ -4,8 +4,10 @@
  */
 (function () {
     'use strict';
-    var BASE = 'http://shuffle.tplinkdns.com:8001';
-    var LOCAL = /^(?:file:|[A-Za-z]:[\\/])/.test(Script.resolvePath('dr-dj.js'));
+    var SCRIPT_URL = Script.resolvePath('dr-dj.js');
+    var LOCAL = /^(?:file:|[A-Za-z]:[\\/])/.test(SCRIPT_URL);
+    var BASE = String(Settings.getValue('darkride/shufflizer/server-base',
+        LOCAL ? '' : SCRIPT_URL.replace(/\/[^/]*$/, ''))).replace(/\/+$/, '');
     var PAGE = LOCAL ? Script.resolvePath('dr-remote.html') : BASE + '/dr-remote';
     var KEY_SETTING = 'darkride/shufflizer/owner-key';
     var VOLUME_SETTING = 'darkride/shufflizer/sound';
@@ -24,6 +26,7 @@
         message.app = 'shufflizer-remote'; tablet.emitScriptEvent(JSON.stringify(message));
     }
     function http(method, path, data, signed, callback) {
+        if (!/^https?:\/\/[^/?#]+/.test(BASE)) { callback('Configure your own player server address in the private installer.'); return; }
         var xhr = new XMLHttpRequest(), body = data ? JSON.stringify(data) : '';
         xhr.open(method, BASE + path);
         xhr.timeout = 90000;

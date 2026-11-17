@@ -26,9 +26,46 @@ def load(name, file):
 server = load("synology_server", "server.py")
 radio_module = load('synology_radio', 'radio.py')
 fixtures = load("synology_fixtures", "fixtures.py")
+settings_module = load('synology_sources', 'sources.py')
 
 
 class PlayerTests(unittest.TestCase):
+    def test_private_connection_settings_save_and_restore(self):
+        handler = self.httpd.RequestHandlerClass
+        handler.connection_settings = settings_module.ConnectionSettings(self.playback_temp.name)
+        values = {'stream_url': 'https://private.example/stream.mp3?token=example',
+                  'screen_url': 'https://private.example/dr-screen'}
+        body = json.dumps(values).encode()
+
+        def save(signed=True, data=body):
+            headers = {'Content-Type': 'application/json'}
+            if signed: headers.update(self.sign('POST', '/api/listening', data))
+            client = http.client.HTTPConnection('127.0.0.1', self.httpd.server_port, timeout=5)
+            client.request('POST', '/api/listening', data, headers)
+            response = client.getresponse()
+            result = response.status, response.read()
+            client.close()
+            return result
+
+        self.assertEqual(save(False)[0], 403)
+        self.assertEqual(save()[0], 200)
+        restored = settings_module.ConnectionSettings(self.playback_temp.name)
+        self.assertEqual(restored.snapshot(), values)
+        self.assertEqual(self.request('/api/listening')[0], 403)
+        response = self.request('/api/listening', headers=self.sign('GET', '/api/listening'))
+        self.assertEqual(json.loads(response[2]), values)
+        invalid = json.dumps({'stream_url': 'javascript:alert(1)', 'screen_url': ''}).encode()
+        self.assertEqual(save(data=invalid)[0], 400)
+        self.assertEqual(handler.connection_settings.snapshot(), values)
+        for route in ('/', '/sources'):
+            self.assertNotIn(b'private.example', self.request(route)[2])
+        handler.control_access = False
+        try:
+            self.assertEqual(self.request('/api/listening', headers=self.sign('GET', '/api/listening'))[0], 403)
+            self.assertEqual(save()[0], 403)
+        finally:
+            handler.control_access = True
+
     def test_dr_screen_listener_routes(self):
         for path in ('/dr-screen', '/dr-screen/'):
             status, headers, body = self.request(path)
@@ -390,10 +427,9 @@ class PlayerTests(unittest.TestCase):
         self.assertEqual(self.request('/media/' + str(ident))[0], 200)
 
     def test_preserved_public_addresses_and_radio_head(self):
-        addresses = json.loads(self.request('/api/listening')[2])
-        self.assertEqual(addresses['mp3_radio'], 'http://shuffle.tplinkdns.com:8001/stream.mp3')
-        self.assertEqual(addresses['player'], 'http://shuffle.tplinkdns.com:8001/')
-        self.assertEqual(addresses['lossless_track'], 'http://shuffle.tplinkdns.com:8001/media/{id}?quality=original')
+        self.assertEqual(self.request('/api/listening')[0], 403)
+        addresses = json.loads(self.request('/api/listening', headers=self.sign('GET', '/api/listening'))[2])
+        self.assertEqual(addresses, {'stream_url': '', 'screen_url': ''})
         status, headers, data = self.request('/stream.mp3', 'HEAD')
         self.assertEqual((status, headers['Content-Type'], data), (200, 'audio/mpeg', b''))
         self.assertIsNone(self.httpd.RequestHandlerClass.radio.thread, 'HEAD must not start an encoder')

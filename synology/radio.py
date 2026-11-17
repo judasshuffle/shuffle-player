@@ -23,6 +23,8 @@ class LibraryRadio:
         self.listeners = set()
         self.thread = self.process = None
         self.closed = False
+        self.external = None
+        self.library_paused = None
         if hasattr(library, 'station_catalog'):
             self.catalog = {track['id']:track for track in library.station_catalog()}
         else:
@@ -44,6 +46,35 @@ class LibraryRadio:
         self.top_up()
         if self.ids: self.index = 0
         self.playing = bool(self.ids) and not start_paused
+
+    def refresh_catalog(self):
+        with self.condition:
+            self.catalog = {track['id']: track for track in self.library.station_catalog()}
+            self.info_cache.clear()
+            self.pool = self.library.program(self.filter_query)[0] if self.mode == 'filter' else list(self.catalog)
+            self.top_up()
+            self.version += 1
+
+    def select_source(self, station):
+        with self.condition:
+            if self.external is None and station is not None:
+                self.library_paused = (self.position(), self.playing)
+            self.external = station.copy() if station else None
+            if station:
+                self.playing = True
+            elif self.library_paused:
+                self.offset, self.playing = self.library_paused
+                self.library_paused = None
+            self.started = time.monotonic()
+            self.version += 1
+            self.generation += 1
+            self.error = ''
+            for listener in self.listeners:
+                while not listener.empty():
+                    try: listener.get_nowait()
+                    except queue.Empty: break
+            if self.process and self.process.poll() is None: self.process.terminate()
+            self.condition.notify_all()
 
     def length(self, ident):
         value = self.info(ident).get('duration') or 240
@@ -141,7 +172,7 @@ class LibraryRadio:
     def settle(self):
         # Encoder EOF owns advancement while streaming. With no encoder the
         # station clock still advances and replenishes the queue automatically.
-        if self.process is not None: return
+        if self.external or self.process is not None: return
         for _ in range(1000):
             if not self.playing or self.index < 0: return
             duration, elapsed = self.length(self.ids[self.index]), self.position()
@@ -156,8 +187,11 @@ class LibraryRadio:
         with self.condition:
             self.settle()
             current = self.info(self.ids[self.index]).copy() if self.index >= 0 else None
+            if self.external:
+                current = {'id': self.external['id'], 'title': self.external['name'], 'artist': 'Internet radio',
+                           'album': 'Live stream', 'duration': 0, 'available': True, 'mime_type': 'audio/mpeg'}
             self.ensure_visual_preset(current['id'] if current else None)
-            state = {'version':self.version, 'index':self.index, 'playing':self.playing,
+            state = {'source':self.external['id'] if self.external else 'library', 'version':self.version, 'index':self.index, 'playing':self.playing,
                      'position':self.position(), 'current':current, 'queue_count':len(self.ids),
                      'listeners':len(self.listeners), 'error':self.error,
                      'mode':self.mode, 'filter_query':self.filter_query,
@@ -183,6 +217,8 @@ class LibraryRadio:
         if set(ids) - found: raise ValueError('An indexed track no longer exists.')
 
     def control(self, action, payload):
+        if self.external and action != 'visualizer':
+            raise ValueError('Select the music library before using library playback controls.')
         if action in ('replace', 'append', 'program'): self.validate_ids(payload.get('ids'))
         # Signed owner-only deployment recovery: restore the ordered queue without
         # silently turning an existing filtered mix into a full-library shuffle.
@@ -372,15 +408,18 @@ class LibraryRadio:
                         self.condition.wait(timeout=.2)
                         continue
                     generation, playing = self.generation, self.playing
+                    external = self.external.copy() if self.external else None
                     ident = self.ids[self.index] if self.index >= 0 else None
                     offset = self.position()
-                    if playing and not self.info(ident)['available']:
+                    if playing and not external and not self.info(ident)['available']:
                         self.advance()
                         continue
                 path = self.library.track(ident) if playing else None
                 command = [self.binary, '-nostdin', '-hide_banner', '-loglevel', 'error',
                     '-re']
-                if playing:
+                if external:
+                    command += ['-rw_timeout', '8000000', '-protocol_whitelist', 'http,https,tcp,tls,crypto', '-i', external['url']]
+                elif playing:
                     command += ['-ss', str(max(0, offset)), '-protocol_whitelist', 'file,pipe', '-i', str(path)]
                 else:
                     command += ['-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo']
@@ -414,7 +453,11 @@ class LibraryRadio:
                         self.process = None
                         if generation == self.generation and self.listeners and playing:
                             if not produced: self.error = 'A queued track could not be played; moving to the next entry.'
-                            self.advance()
+                            if external:
+                                self.error = 'Radio stream interrupted. Retrying; choose Music library to return.'
+                                self.condition.wait(timeout=2)
+                            else:
+                                self.advance()
         except (OSError, ValueError):
             pass
         finally:

@@ -10,6 +10,20 @@
   async function monitor(force = false) {
     const track = state?.current;
     qualityInfo(track);
+    if (state?.source && state.source !== 'library') {
+      el('qualityInfo').textContent = 'Live radio · shared MP3 stream';
+      if (!monitoring) { player.pause(); return; }
+      if (loadedId !== track.id || force) {
+        ++playbackVersion;
+        if (cancelPendingPlayback) cancelPendingPlayback();
+        pendingPlayback = null;
+        loadedId = track.id;
+        player.src = '/stream.mp3';
+        player.load();
+      }
+      if (player.paused) await player.play();
+      return;
+    }
     if (!monitoring || !track || !state.playing) {
       if (pendingPlayback) {
         ++playbackVersion;
@@ -36,19 +50,19 @@
       window.currentTrackTitle = `${track.artist || 'Unknown artist'} — ${track.title || 'Untitled'}`;
       el('title').textContent = window.currentTrackTitle;
       el('album').textContent = track.album || '';
-      el('artwork').src = '/artwork/' + track.id;
+      el('artwork').src = state.source && state.source !== 'library' ? '/artwork/fallback.svg' : '/artwork/' + track.id;
       el('artwork').alt = 'Album artwork for ' + (track.album || track.title || 'current track');
       el('originalLink').href = '/media/' + track.id + '?quality=original';
       el('mp3Link').href = '/media/' + track.id + '?quality=mp3';
-      el('originalLink').hidden = el('mp3Link').hidden = false;
+      el('originalLink').hidden = el('mp3Link').hidden = !!state.source && state.source !== 'library';
     }
     el('toggle').textContent = state.playing ? 'Pause station' : 'Play station';
-    ['toggle','prev','next','shuffleAll','playMatches','queueMatches'].forEach(id => { el(id).disabled = !state.can_control; });
+    ['toggle','prev','next','shuffleAll','playMatches','queueMatches'].forEach(id => { el(id).disabled = !state.can_control || (!!state.source && state.source !== 'library'); });
     seek.disabled = !state.can_control || !track?.duration;
     seek.max = track?.duration || 1;
     seek.value = Math.min(clock(), Number(seek.max));
     el('stationTime').textContent = `${time(clock())} / ${time(track?.duration || 0)}`;
-    el('stationStatus').textContent = `${state.playing ? 'Playing' : 'Paused'} on the shared DarkRide station · ${state.queue_count} queued tracks. ${state.can_control ? 'These controls change what everyone hears.' : 'Open the LAN player to control the station.'} DarkRide may lag by a few seconds.`;
+    el('stationStatus').textContent = state.source && state.source !== 'library' ? `Live radio · ${track?.title || ''}. ${state.error || ''}` : `${state.playing ? 'Playing' : 'Paused'} on the shared DarkRide station · ${state.queue_count} queued tracks. ${state.can_control ? 'These controls change what everyone hears.' : 'Open the LAN player to control the station.'} DarkRide may lag by a few seconds.`;
     el('queue').replaceChildren();
     el('queue').start = previewStart + 1;
     preview.forEach((item, local) => {

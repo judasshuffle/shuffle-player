@@ -1,7 +1,7 @@
 name: shuffle-player
 services:
   player:
-    image: shuffle-player:music-feed-20261116
+    image: shuffle-player:sources-20261117
     build:
       context: .
       dockerfile: synology/Dockerfile
@@ -10,9 +10,11 @@ services:
       - "192.168.68.81:8094:8081"
       - "192.168.68.81:8001:8080"
     environment:
-      PUBLIC_LISTENING_BASE: http://shuffle.tplinkdns.com:8001
+      SHUFFLE_LOCAL_LISTENING_BASE: http://192.168.68.81:8001
+      SHUFFLE_WORKING_DIRECTORY: /working
+      SHUFFLE_SOURCE_DIRECTORY: /settings
       SHUFFLE_OWNER_KEY_FILE: /run/shuffle-owner/owner-key
-      SHUFFLE_START_PAUSED: "0"
+      SHUFFLE_START_PAUSED: "1"
       SHUFFLE_VISUALIZER_BANK: VLM
     volumes:
       - type: bind
@@ -31,6 +33,16 @@ services:
         source: /volume1/Media/Media/LOSSLESS
         target: /mnt/lossless
         read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/docker/shuffle-player/working
+        target: /working
+        bind:
+          create_host_path: false
+      - type: bind
+        source: /volume1/docker/shuffle-player/settings
+        target: /settings
         bind:
           create_host_path: false
     read_only: true

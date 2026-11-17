@@ -123,6 +123,19 @@ def read_tags(path: str):
         "samplerate": samplerate, "channels": channels,
     }
 
+def scan(database, music, force=False):
+    global MUSIC_ROOT
+    MUSIC_ROOT = str(music)
+    con = sqlite3.connect(str(database))
+    try:
+        return scan_connection(con, force)
+    except Exception:
+        con.rollback()
+        raise
+    finally:
+        con.close()
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true",
@@ -132,6 +145,11 @@ def main():
     args = ap.parse_args()
 
     con = connect()
+    result = scan_connection(con, args.force, args.prune)
+    print(result)
+
+
+def scan_connection(con, force=False, prune=False):
     ensure_schema(con)
     now = int(time.time())
     scanned = inserted = changed = skipped = removed = 0
@@ -144,7 +162,10 @@ def main():
         row = con.execute("SELECT added_at FROM tracks WHERE path=?", (path,)).fetchone()
         return int(row[0]) if row else now
 
-    for root, dirs, files in os.walk(MUSIC_ROOT):
+    def walk_error(error):
+        raise error
+
+    for root, dirs, files in os.walk(MUSIC_ROOT, onerror=walk_error):
         dirs[:] = [d for d in dirs if d != "Playlists"]
         if is_playlists_path(root):
             continue
@@ -155,6 +176,8 @@ def main():
                 continue
 
             path = os.path.join(root, fn)
+            if not Path(path).resolve().is_relative_to(Path(MUSIC_ROOT).resolve()):
+                continue
             if is_playlists_path(path):
                 continue
 
@@ -168,7 +191,7 @@ def main():
             scanned += 1
 
             prev = existing.get(path)
-            if not args.force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
+            if not force and prev and prev[0] == mtime and prev[1] == size and prev[0] != 0:
                 skipped += 1
                 continue
 
@@ -205,10 +228,9 @@ def main():
             else:
                 inserted += 1
 
-            if (inserted + changed) % 250 == 0:
-                con.commit()
 
-    if args.prune:
+
+    if prune:
         missing = [path for path in existing if not os.path.exists(path)]
         if missing:
             con.executemany("DELETE FROM tracks WHERE path=?", [(path,) for path in missing])
@@ -219,13 +241,8 @@ def main():
     total = con.execute("SELECT COUNT(*) FROM tracks").fetchone()[0]
     con.close()
 
-    print("Library scan complete")
-    print(f"Scanned files: {scanned}")
-    print(f"Added tracks: {inserted}")
-    print(f"Updated tracks: {changed}")
-    print(f"Removed missing tracks: {removed}")
-    print(f"Unchanged tracks: {skipped}")
-    print(f"Database total: {total}")
+    return {"added": inserted, "updated": changed, "unchanged": skipped,
+            "scanned": scanned, "total": total, "finished_at": now}
 
 if __name__ == "__main__":
     main()

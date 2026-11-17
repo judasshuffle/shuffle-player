@@ -75,3 +75,10 @@ synology/cache/
 *.log
 *.tmp
 .pytest_cache/
+
+# Private connection/source settings and persistent working library
+synology/settings/
+synology/working/
+/settings/
+/working/
+**/connection.json

@@ -112,11 +112,12 @@ def interpret(query):
 
 
 class Library:
-    def __init__(self, database, music):
+    def __init__(self, database, music, working=False):
+        self.working = working
         self.database, self.music = Path(database).resolve(), Path(music).resolve()
         if not self.database.is_file() or not self.music.is_dir():
             raise ValueError("Existing copied index and music mount required. Nothing will be created.")
-        if any(Path(str(self.database) + suffix).exists() for suffix in ("-wal", "-journal")):
+        if not working and any(Path(str(self.database) + suffix).exists() for suffix in ("-wal", "-journal")):
             raise ValueError("Use a consistent standalone SQLite backup without active journal files.")
         with self.connect() as con:
             columns = {r[1] for r in con.execute("PRAGMA table_info(tracks)")}
@@ -130,7 +131,11 @@ class Library:
 
     def connect(self):
         # Only a closed, consistent backup is supported. Immutable prevents sidecar writes.
-        return closing(sqlite3.connect(self.database.as_uri() + "?mode=ro&immutable=1", uri=True))
+        return closing(sqlite3.connect(self.database.as_uri() + ("?mode=ro" if self.working else "?mode=ro&immutable=1"), uri=True))
+
+    def refresh_metadata(self):
+        with self.connect() as con:
+            self.genre_counts = con.execute('SELECT genre,COUNT(*) FROM tracks GROUP BY genre').fetchall() if self.has_genre else []
 
     def resolve(self, stored):
         path = PurePosixPath(stored)
@@ -398,6 +403,9 @@ class Handler(SimpleHTTPRequestHandler):
     visuals = None
     mp3_cache = None
     radio = None
+    sources = None
+    connection_settings = None
+    scanner = None
     control_access = False
     owner_auth = OwnerAuth()
 
@@ -443,7 +451,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path not in ('/api/station/control', '/api/dj'):
+        if path not in ('/api/station/control', '/api/dj', '/api/sources', '/api/scan', '/api/listening'):
             return self.send_error(405, "Indexing and system controls are disabled")
         try:
             if path == '/api/station/control' and not self.control_access:
@@ -455,6 +463,15 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_error(403, 'Owner signature required, expired or already used')
             payload = json.loads(body)
             if not isinstance(payload, dict): raise ValueError()
+            if path == '/api/listening':
+                if not self.control_access or not self.connection_settings: return self.send_error(403)
+                return self.content(json.dumps(self.connection_settings.save(payload)), 'application/json')
+            if path == '/api/sources':
+                if not self.control_access or not self.sources: return self.send_error(403)
+                return self.content(json.dumps(self.sources.command(payload)), 'application/json')
+            if path == '/api/scan':
+                if not self.control_access or not self.scanner: return self.send_error(403)
+                return self.content(json.dumps(self.scanner.start()), 'application/json')
             if path == '/api/dj': return self.dj_command(payload)
             if payload.get('action') == 'program':
                 query = payload.get('query', '')
@@ -463,7 +480,7 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = {'action':'program', 'ids':ids, 'query':query, 'album':album}
             self.radio.control(payload.get('action'), payload)
             return self.content(json.dumps(self.station_state(owner=True)), 'application/json')
-        except (ValueError, TypeError) as error:
+        except (ValueError, TypeError, OSError) as error:
             return self.send_error(400, str(error) or 'Invalid station command')
 
     def dj_command(self, payload):
@@ -498,6 +515,18 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self):
         url = urlparse(self.path)
         path = url.path
+        if path in ('/api/sources', '/api/scan'):
+            if not self.control_access or not self.sources: return self.send_error(403)
+            result = self.sources.snapshot() if path == '/api/sources' else self.scanner.status.copy()
+            if path == '/api/sources':
+                result['can_control'] = self.owner_auth.verify('GET', self.path, self.headers)
+                if not result['can_control']:
+                    for station in result['stations']: station.pop('url', None)
+            return self.content(json.dumps(result), 'application/json')
+        if path in ('/sources', '/sources.js', '/connection.js'):
+            if not self.control_access: return self.send_error(403)
+            return self.content((HERE / ('sources.html' if path == '/sources' else path.lstrip('/'))).read_bytes(),
+                                'text/html; charset=utf-8' if path == '/sources' else 'text/javascript')
         if path == '/api/owner-challenge':
             return self.content(json.dumps({'epoch': self.owner_auth.epoch, 'time': int(time.time())}), 'application/json')
         if path == '/api/station':
@@ -509,10 +538,12 @@ class Handler(SimpleHTTPRequestHandler):
         if path == '/stream.mp3':
             return self.radio_stream()
         if path == '/api/listening':
-            base = os.environ.get('PUBLIC_LISTENING_BASE', 'http://shuffle.tplinkdns.com:8001').rstrip('/')
-            return self.content(json.dumps({'player': base + '/', 'mp3_radio': base + '/stream.mp3',
-                'lossless_track': base + '/media/{id}?quality=original',
-                'mp3_track': base + '/media/{id}?quality=mp3'}), 'application/json')
+            if not self.control_access or not self.owner_auth.verify('GET', self.path, self.headers):
+                return self.send_error(403, 'Unlock owner access to view saved connection addresses')
+            result = self.connection_settings.snapshot() if self.connection_settings else {'stream_url': '', 'screen_url': ''}
+            local = os.environ.get('SHUFFLE_LOCAL_LISTENING_BASE', '')
+            if local: result['local_listening_base'] = local
+            return self.content(json.dumps(result), 'application/json')
         if path == '/api/styles':
             if not self.control_access: return self.send_error(403)
             return self.content(json.dumps(self.library.styles()), 'application/json')
@@ -693,12 +724,21 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     from radio import LibraryRadio
-    Handler.library = Library(os.environ.get("JUKEBOX_DB_PATH", "/data/jukebox.db"), os.environ.get("JUKEBOX_MUSIC_ROOT", "/mnt/lossless"))
+    working = os.environ.get('SHUFFLE_WORKING_DIRECTORY')
+    database = os.environ.get("JUKEBOX_DB_PATH", "/data/jukebox.db")
+    if working:
+        from sources import seed_index, Sources, Scanner, ConnectionSettings
+        database = seed_index(database, working)
+    Handler.library = Library(database, os.environ.get("JUKEBOX_MUSIC_ROOT", "/mnt/lossless"), working=bool(working))
     Handler.visuals = Path(os.environ.get("SHUFFLIZER_ROOT", "/app/visualizer"))
     Handler.mp3_cache = Mp3Cache(os.environ.get('PLAYBACK_CACHE', '/cache'), os.environ.get('FFMPEG_BINARY', 'ffmpeg'))
     Handler.radio = LibraryRadio(Handler.library, os.environ.get('FFMPEG_BINARY', 'ffmpeg'),
                                 start_paused=os.environ.get('SHUFFLE_START_PAUSED') == '1',
                                 visualizer_bank=os.environ.get('SHUFFLE_VISUALIZER_BANK', 'Default'))
+    if working:
+        Handler.connection_settings = ConnectionSettings(os.environ.get('SHUFFLE_SOURCE_DIRECTORY', '/settings'))
+        Handler.sources = Sources(os.environ.get('SHUFFLE_SOURCE_DIRECTORY', '/settings'), Handler.radio)
+        Handler.scanner = Scanner(working, Handler.library, Handler.radio)
     key_file = os.environ.get('SHUFFLE_OWNER_KEY_FILE')
     Handler.owner_auth = OwnerAuth(Path(key_file).read_text().strip() if key_file else '')
     class LanHandler(Handler):

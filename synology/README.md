@@ -1,5 +1,12 @@
 # Synology browser player
 
+## Sources preview - 17 November 2026
+
+An isolated Sources, internet radio, and incremental scanner preview is available
+on NAS LAN port 8095. See [SOURCES-PREVIEW.md](SOURCES-PREVIEW.md) for URLs,
+read-only mounts, persistent working-index/settings paths, scan results, and
+real Edge verification. Production on ports 8094/8001 is unchanged.
+
 ## DarkRide music feed and lighting integration
 
 The existing `/dr-screen` now exposes a bounded music-analysis feed through its

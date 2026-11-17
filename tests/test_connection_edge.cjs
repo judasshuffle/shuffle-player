@@ -1,0 +1,80 @@
+// Isolated Edge against the preview: saves that preview's own LAN connection.
+const assert = require('node:assert/strict');
+const {execFileSync} = require('node:child_process');
+const {chromium} = require('../synology/cache/reconnect-test/node_modules/playwright-core');
+const base = 'http://192.168.68.81:8095';
+let browser, page, original;
+(async () => {
+  const key = execFileSync('C:/Windows/System32/OpenSSH/ssh.exe', ['-o','BatchMode=yes','Dan@GreatATuin',
+    'cat /volume1/docker/shuffle-player/secrets/owner-key'], {encoding:'utf8',windowsHide:true}).trim();
+  browser = await chromium.launch({executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+    headless:true,args:['--autoplay-policy=no-user-gesture-required']});
+  const context = await browser.newContext(), errors = [];
+  page = await context.newPage();
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(base + '/sources', {waitUntil:'domcontentloaded'});
+  await page.locator('#ownerKey').fill(key);
+  await page.locator('#rememberOwner').check();
+  await page.locator('#ownerLogin button').first().click();
+  await page.waitForFunction(() => !document.querySelector('#saveConnection').disabled);
+  await page.waitForFunction(() => document.querySelector('#connectionStatus').textContent !== 'Unlock owner access to view or save your connection.');
+  original = await page.evaluate(async () => (await (await fetch('/api/listening')).json()));
+  assert(!original.public_base, 'Refusing to replace an existing public setup in this preview test');
+  await page.locator('#publicPlayerBase').fill('http://192.168.1.4:8001');
+  await page.locator('#saveConnection').click();
+  await page.locator('#connectionStatus').filter({hasText:'home-network address'}).waitFor();
+  await page.locator('#publicPlayerBase').fill('https://setup.example/dr-screen?old-cache=123');
+  await page.locator('#saveConnection').click();
+  await page.waitForFunction(() => document.querySelector('#connectionStream').value === 'https://setup.example/stream.mp3');
+  assert.equal(await page.locator('#publicPlayerBase').inputValue(), 'https://setup.example');
+  assert.equal(await page.locator('#connectionScreen').inputValue(), 'https://setup.example/dr-screen');
+  assert((await page.locator('#internetTestStatus').textContent()).includes('has not been confirmed'));
+  await page.locator('#testLocalAudio').click();
+  await page.waitForFunction(() => !document.querySelector('#localTestAudio').paused && document.querySelector('#localTestAudio').currentTime > .1);
+  assert((await page.locator('#localTestStatus').textContent()).includes('does not test internet access'));
+  assert((await page.locator('#internetTestStatus').textContent()).includes('has not been confirmed'), 'Local audio never marks internet ready');
+  await page.locator('#stopLocalAudio').click();
+  await page.locator('#outsideHeard').check();
+  await page.locator('#confirmInternet').click();
+  await page.locator('#internetTestStatus').filter({hasText:'recorded by you'}).waitFor();
+  await page.locator('#publicPlayerBase').fill('https://changed.example');
+  await page.locator('#saveConnection').click();
+  await page.waitForFunction(() => document.querySelector('#connectionStream').value === 'https://changed.example/stream.mp3');
+  assert((await page.locator('#internetTestStatus').textContent()).includes('has not been confirmed'), 'Changed address resets prior test');
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => document.querySelector('#publicPlayerBase').value === 'https://changed.example');
+  const state = await page.evaluate(async () => (await (await fetch('/api/listening')).json()));
+  assert.equal(state.internet_confirmed_at, 0);
+  await page.locator('summary').filter({hasText:'Show me what goes in the router'}).click();
+  assert.equal(await page.locator('#routerDevice').textContent(), '192.168.68.81');
+  assert.equal(await page.locator('#routerPort').textContent(), '8002');
+  assert.equal((await context.request.get(base + '/api/listening')).status(), 403, 'Unsigned connection reads rejected');
+  assert.equal((await context.request.post(base + '/api/listening', {data:{stream_url:'',screen_url:''}})).status(), 403);
+  const publicSources = await (await context.request.get(base + '/api/sources')).json();
+  assert(publicSources.stations.every(station => station.url === undefined), 'Source stream URLs hidden without owner unlock');
+  for (const asset of ['/', '/sources', '/dr-dj.js']) {
+    const text = await (await context.request.get(base + asset)).text();
+    assert(!text.includes('shuffle.tplinkdns.com'), 'Personal station address absent from release asset ' + asset);
+  }
+  await page.evaluate(async values => { const r = await fetch('/api/listening', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}); if(!r.ok) throw Error('Could not restore preview connection'); }, original);
+  original = null;
+  await page.reload({waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => !document.querySelector('#saveConnection').disabled);
+  await page.locator('#darkRideConnection').scrollIntoViewIfNeeded();
+  await page.screenshot({path:'synology/cache/connection-settings.png',fullPage:true});
+  await page.setViewportSize({width:390,height:844});
+  await page.screenshot({path:'synology/cache/connection-settings-mobile.png',fullPage:true});
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Guide fits a phone width');
+  await page.locator('#ownerLock').click();
+  await page.waitForFunction(() => document.querySelector('#connectionStream').value === '' && document.querySelector('#connectionStream').disabled);
+  await page.goto(base + '/dr-screen', {waitUntil:'domcontentloaded'});
+  await page.waitForFunction(() => {
+    const graph = window.playerAudio;
+    if (!graph || graph.audioCtx.state !== 'running') return false;
+    const wave = new Float32Array(graph.analyser.fftSize);
+    graph.analyser.getFloatTimeDomainData(wave);
+    return wave.some(sample => Math.abs(sample) > .001);
+  }, null, {timeout:30000});
+  assert.deepEqual(errors, []);
+  console.log('PASS Edge guided setup: private-IP explanation, pasted screen link normalization, automatic links, local audio without internet claim, explicit self-test and reset, router listening port, saved settings/privacy, mobile layout and screen audio.');
+})().catch(error => {console.error(error);process.exitCode=1;}).finally(async () => {if (page && original) { try { await page.evaluate(async values => fetch('/api/listening', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(values)}), original); } catch {} } if(browser) await browser.close();});

@@ -8,7 +8,7 @@ for(const value of ['', 'Bob Dylan — 70s', 'a'.repeat(10000)]) {
 }
 function exercise(owner) {
   let receive,screen,end,requestCount=0;
-  const outgoing=[],requests=[],settings=new Map(owner?[['darkride/shufflizer/owner-key','a'.repeat(64)]]:[]),local=[];
+  const outgoing=[],requests=[],settings=new Map(owner?[['darkride/shufflizer/owner-key','a'.repeat(64)],['darkride/shufflizer/server-base','https://owner.example']]:[]),local=[];
   const signal=setter=>({connect:setter,disconnect(){}});
   const button={clicked:signal(()=>{}),editProperties(){}};
   const tablet={addButton(){return button;},removeButton(){},gotoHomeScreen(){},screenChanged:signal(f=>screen=f),webEventReceived:signal(f=>receive=f),emitScriptEvent(raw){outgoing.push(JSON.parse(raw));}};
@@ -18,14 +18,14 @@ function exercise(owner) {
     this.onreadystatechange();
   };}
   vm.runInNewContext(fs.readFileSync('synology/dr-dj.js','utf8'),{
-    Script:{require(){return sha256;},resolvePath(p){return owner?'file:///private/'+p:'http://shuffle.tplinkdns.com:8001/'+p;},scriptEnding:signal(f=>end=f)},
+    Script:{require(){return sha256;},resolvePath(p){return owner?'file:///private/'+p:'https://visitor.example/'+p;},scriptEnding:signal(f=>end=f)},
     Settings:{getValue(k,d){return settings.has(k)?settings.get(k):d;},setValue(k,v){settings.set(k,v);}},
     Tablet:{getTablet(){return tablet;}},Messages:{sendLocalMessage(...m){local.push(m);}},
     XMLHttpRequest:XHR,Uuid:{generate(){return '01234567-89ab-cdef-0123-456789abcdef';}}
   });
   const send=m=>receive(JSON.stringify({app:'shufflizer-remote',...m}));
   screen('Web','https://unrelated.test/'); send({command:'next',request:1}); assert.equal(requests.length,0);
-  screen('Web',owner?'file:///private/dr-remote.html':'http://shuffle.tplinkdns.com:8001/dr-remote');
+  screen('Web',owner?'file:///private/dr-remote.html':'https://visitor.example/dr-remote');
   send({hello:true});assert.equal(outgoing.at(-1).owner,owner);
   send({sound:35});assert.equal(settings.get('darkride/shufflizer/sound'),35);assert.equal(JSON.parse(local[0][1]).sound,35);
   send({command:'play',query:'play 70s Bob Dylan',request:2});

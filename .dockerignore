@@ -31,3 +31,13 @@
 !synology/owner.js
 !synology/sha256.js
 !synology/sha256-LICENSE.txt
+
+!synology/sources.py
+!synology/sources.html
+!synology/sources.js
+!scripts/
+!scripts/update_index_sqlite.py
+!src/
+!src/config.py
+
+!synology/connection.js
