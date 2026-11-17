@@ -1,11 +1,18 @@
 # Synology browser player
 
-## Sources preview - 17 November 2026
+## Sources live - 17 November 2026
 
-An isolated Sources, internet radio, and incremental scanner preview is available
-on NAS LAN port 8095. See [SOURCES-PREVIEW.md](SOURCES-PREVIEW.md) for URLs,
-read-only mounts, persistent working-index/settings paths, scan results, and
-real Edge verification. Production on ports 8094/8001 is unchanged.
+Sources, saved internet stations, the incremental scanner, remembered owner
+unlock and guided DarkRide connection setup are now deployed on the normal
+Synology player. Owner player: http://192.168.68.81:8094/ ; Sources/setup:
+http://192.168.68.81:8094/sources . The existing public screen/stream host and
+port 8001 are unchanged. Playback was deliberately left paused.
+
+The exact old application is backed up in GitHub on
+`backup/synology-live-20261117` (`df845f4`), and its image/private rollback files
+are retained on the NAS. See [SOURCES-DEPLOYMENT.md](SOURCES-DEPLOYMENT.md) for
+migration evidence and [SOURCES-PREVIEW.md](SOURCES-PREVIEW.md) for the earlier
+isolated testing. The preview remains separate on ports 8095/8002.
 
 ## DarkRide music feed and lighting integration
 

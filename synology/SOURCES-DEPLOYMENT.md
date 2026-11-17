@@ -40,3 +40,32 @@ The live endpoints remain:
 
 This change does not modify router forwarding, DNS, DarkRide entities or the
 in-world installer. Starting the player remains an explicit owner action.
+
+## Completed live deployment - 17 November 2026
+
+Release code commit: `50d2ca3636586079c083c7f8f7fc67ca40c6256d` on
+`feature/synology-browser-player`.
+
+Deployed image:
+`sha256:7f1539105807b5136269e322e8c9cd1393c67e2d63d958b44d764c563ce68f10`
+
+Private NAS rollback directory:
+`/volume1/docker/shuffle-player/before-sources-20261117T093423Z`.
+
+Preflight and live checks passed. The live working index has 17,719 entries;
+the original 17,623-track backup hash is unchanged. Music, original database and
+owner-key mounts remain read-only, the application root is read-only, and live
+working/settings mounts are separate from preview. Owner key and both listening
+ports are unchanged. The DarkRide container ID/start time were checked unchanged.
+The disposable queue was rebuilt as the user requested. Playback remains paused.
+
+The user's Dismuke URL passed the server's audio-decode test and was saved as a
+station in the private live settings. It was not selected, embedded in release
+defaults, or used to resume playback.
+
+An isolated real Edge check against the live service passed: owner unlock,
+Sources/guided setup, Dismuke's saved entry, two sample-album search results,
+listening-port hint 8001, owner-only connection settings, and the existing public
+screen with its old `music-feed` query suffix. The screen consumed the live MP3
+while the station remained paused (silence is intentional). No transport, skip,
+shuffle, scan or source-change command was sent during this live acceptance test.
