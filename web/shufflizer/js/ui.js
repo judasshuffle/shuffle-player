@@ -1,4 +1,4 @@
-﻿import { listBanks, listPresets, getPreset } from "./presets.js";
+import { listBanks, listPresets, getPreset } from "./presets.js";
 
 function clamp(v, min, max) {
   return Math.max(min, Math.min(max, v));
@@ -909,3 +909,4 @@ if (document.readyState === "loading") {
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", retry);
   else retry();
 })();
+

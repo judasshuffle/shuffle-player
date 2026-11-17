@@ -405,7 +405,7 @@ class Handler(SimpleHTTPRequestHandler):
         state = self.radio.snapshot(since)
         state['can_control'] = owner
         if not owner:
-            for key in ('queue', 'queue_start', 'queue_kinds'): state.pop(key, None)
+            for key in ('queue', 'queue_start'): state.pop(key, None)
         return state
 
     def trusted_control_host(self):

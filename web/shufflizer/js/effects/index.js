@@ -1,4 +1,4 @@
-﻿import { effect as tempestTunnel } from "./tempestTunnel.js";
+import { effect as tempestTunnel } from "./tempestTunnel.js";
 import { effect as ringShock } from "./ringShock.js";
 import { effect as vectorBurst } from "./vectorBurst.js";
 import { effect as kevsFractalTree } from "./kevsFractalTree.js";
@@ -17,3 +17,4 @@ export const EFFECTS = [
 export function getEffectById(id) {
   return EFFECTS.find(e => e.id === id) ?? EFFECTS[0];
 }
+

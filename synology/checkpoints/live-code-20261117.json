@@ -1,0 +1,138 @@
+{
+  "image": "sha256:22216de8c1fa92ba98e13a454b16ca474ddd8757660b0e7b028dd79e81acb202",
+  "files": {
+    "synology/app.js": {
+      "normalized": "625ead2e9ea8b04a6bd6aaaf891e2a029b293a4fb088cb4a7b6f78dfc03adec5",
+      "raw": "625ead2e9ea8b04a6bd6aaaf891e2a029b293a4fb088cb4a7b6f78dfc03adec5"
+    },
+    "synology/dr-dj.js": {
+      "normalized": "757679f443b6f4b5e9b72dd7c726d6d3f89984fc0f58161f3cbb479271c02a28",
+      "raw": "757679f443b6f4b5e9b72dd7c726d6d3f89984fc0f58161f3cbb479271c02a28"
+    },
+    "synology/dr-remote.html": {
+      "normalized": "39294a1a43160cd0e897b71904f927230fcfabc58acc69e5f4b8f07055a45faa",
+      "raw": "fcfb9746d3dc3220157009e1314073440ba56300f19d312bd31f63984adc824f"
+    },
+    "synology/dr-remote.js": {
+      "normalized": "81ae83a031d7e79cc7855ca7d81d65b4c1503b220fe3159689260f7c7e0ade67",
+      "raw": "81ae83a031d7e79cc7855ca7d81d65b4c1503b220fe3159689260f7c7e0ade67"
+    },
+    "synology/dr-screen-entity.js": {
+      "normalized": "52943c8806a3fcbcfe0175febce9d1728773bbb918d66e91b61cdb7abd11cace",
+      "raw": "52943c8806a3fcbcfe0175febce9d1728773bbb918d66e91b61cdb7abd11cace"
+    },
+    "synology/dr-screen.html": {
+      "normalized": "8c895fbcd1f186fe7a35892334f73572c02e9554c36c3d3e0a3cc581dfe77901",
+      "raw": "8c895fbcd1f186fe7a35892334f73572c02e9554c36c3d3e0a3cc581dfe77901"
+    },
+    "synology/dr-screen.js": {
+      "normalized": "03a33e5c257a3fb9a89c782ad448af72727389ba6b28bf9925b100f497fe149c",
+      "raw": "03a33e5c257a3fb9a89c782ad448af72727389ba6b28bf9925b100f497fe149c"
+    },
+    "synology/index.html": {
+      "normalized": "a40eb7fe4f6a86d0156b840ca29df1db4f3745b449e1418576b34fce832419ec",
+      "raw": "c997a6110a0ea3ded7878b87fe2175b71653ca1d49950c25f3c51341b79f5077"
+    },
+    "synology/music-features.js": {
+      "normalized": "c1310406fede30dec897539f36d4a830d5ed9040fe00c49a86721d401c84c782",
+      "raw": "c1310406fede30dec897539f36d4a830d5ed9040fe00c49a86721d401c84c782"
+    },
+    "synology/music-telemetry.js": {
+      "normalized": "271ec0e04a56e90a4d3eb0880110be3fb612ca99959044280e515246d2d5ccc1",
+      "raw": "271ec0e04a56e90a4d3eb0880110be3fb612ca99959044280e515246d2d5ccc1"
+    },
+    "synology/owner.js": {
+      "normalized": "c8ca8108b5f5918ad9af8905b1bfcfdce18b85bc7e396a48c9263af35ebbf600",
+      "raw": "c8ca8108b5f5918ad9af8905b1bfcfdce18b85bc7e396a48c9263af35ebbf600"
+    },
+    "synology/palette.js": {
+      "normalized": "3aab2e54c495d5182ffb9a60b4f948f61acd5aa268289446be8efde9eff7c2f8",
+      "raw": "3aab2e54c495d5182ffb9a60b4f948f61acd5aa268289446be8efde9eff7c2f8"
+    },
+    "synology/radio.py": {
+      "normalized": "69f05be562e749765a33417b9b4759f733b84185d59a4665d8f561b583b667ec",
+      "raw": "2dcd1751ac037e23326694e4982cb864072f99e3d4e41d66a8d1444b542092f4"
+    },
+    "synology/server.py": {
+      "normalized": "da568484850e04c9cfcfdac7b5eeb2482aac6c2876fe3009927924cf97fc393d",
+      "raw": "da568484850e04c9cfcfdac7b5eeb2482aac6c2876fe3009927924cf97fc393d"
+    },
+    "synology/sha256-LICENSE.txt": {
+      "normalized": "0fea2e0cffe72ee17adc25c42e55daf5c87c6e9cd5b3362ee4213890bda0ee7c",
+      "raw": "0fea2e0cffe72ee17adc25c42e55daf5c87c6e9cd5b3362ee4213890bda0ee7c"
+    },
+    "synology/sha256.js": {
+      "normalized": "2db6c8e554fbee14672368a0d7551a8ddd841ee96c91526eb7987a0179cfc717",
+      "raw": "2db6c8e554fbee14672368a0d7551a8ddd841ee96c91526eb7987a0179cfc717"
+    },
+    "synology/station.js": {
+      "normalized": "fc8d7e7623ae93a6bf86b22f3435d03b927a1fb23189f46ce33d76522d448966",
+      "raw": "fc8d7e7623ae93a6bf86b22f3435d03b927a1fb23189f46ce33d76522d448966"
+    },
+    "web/shufflizer/css/style.css": {
+      "normalized": "41a004d5f667de5b468859479048c68e97420301636225fbb879b57725267d93",
+      "raw": "41a004d5f667de5b468859479048c68e97420301636225fbb879b57725267d93"
+    },
+    "web/shufflizer/index.html": {
+      "normalized": "a717ff0005763977e7dc2b549f0d8a3d1b335f1d52385cce9529ba8fe6b97af3",
+      "raw": "a717ff0005763977e7dc2b549f0d8a3d1b335f1d52385cce9529ba8fe6b97af3"
+    },
+    "web/shufflizer/js/audio.js": {
+      "normalized": "38c6260f75c82b39619f10c0b054ae306e077576d2a0acc253f3516197f6714e",
+      "raw": "4837c1fe9a382a4d1c15738d48bc26bf432de1c6a194f1f639e463471ddde4aa"
+    },
+    "web/shufflizer/js/effects/echoLoom.js": {
+      "normalized": "b18ba9668d45c7129acd1a6c7755fa179e170ce93ab7a54e8281c2a71c4d9e73",
+      "raw": "b18ba9668d45c7129acd1a6c7755fa179e170ce93ab7a54e8281c2a71c4d9e73"
+    },
+    "web/shufflizer/js/effects/index.js": {
+      "normalized": "da09ab94aef0afbce20c0765d6e22ba2aa9134ebe9a2e8a7326bead0d94d55bd",
+      "raw": "56220c28fd081ca88bf5593ca22461a3cb01449fe8aaab01e6e2f3ed1300fead"
+    },
+    "web/shufflizer/js/effects/kevsFractalTree.js": {
+      "normalized": "1ed6a81f2e90e9e9d57ceb4f7587d812a790513ba10be876bd1629a1f22f4c0a",
+      "raw": "55a1b7893a6f2a81d14b650748d2b64999f3427345a94fd754329e989de17cca"
+    },
+    "web/shufflizer/js/effects/ringShock.js": {
+      "normalized": "7560bb3dfe2e767a97b90ab25aeb51a1f8bcf2b7c496ec028dd0a76fa4b66668",
+      "raw": "6d493a73440b4ef6542e99962729c118c98e40db57eb28d1ad885dd6425c4491"
+    },
+    "web/shufflizer/js/effects/tempestBonusPyramids.js": {
+      "normalized": "9fbd8fbb456e0914095c09f172be007329ad038c7963cd35a7923a3adaaa0b29",
+      "raw": "121c80570fc954c5c31e700753c23edabb5781904d24593ef0d87084a1a550b6"
+    },
+    "web/shufflizer/js/effects/tempestTunnel.js": {
+      "normalized": "cff49ed3dc5dfdcc640816873a1cf7700351d033cc7901594afd9ddc181953d5",
+      "raw": "b948996da4aaa2aa6262a1ad56e7f17e97fa53e732e5571c25016d1edae4ccac"
+    },
+    "web/shufflizer/js/effects/vectorBurst.js": {
+      "normalized": "a9447747f14275f6582230be863f1da0d78a022e2d1966fe10b4c09563eb5ad9",
+      "raw": "273fc3b59374f6c82e885e070462b733048f277e083c6feeb17d438bae9bdf02"
+    },
+    "web/shufflizer/js/engine.js": {
+      "normalized": "92cc183e08130add918e69befe44db2b19ffa0b8b3de82aea4eaf8f15c9310ca",
+      "raw": "0c1c498404eb867ab1b531f664c7fd215017159b2d6fa8463f2aca54f6fff07c"
+    },
+    "web/shufflizer/js/main.js": {
+      "normalized": "fc2fc6481adad4511e0fce527372540c99846db13e67772338f1c80739ae49c6",
+      "raw": "af3257b737a383542939784d31c70b350dc5c8d07710959419249abc5ff240ad"
+    },
+    "web/shufflizer/js/nowPlaying.js": {
+      "normalized": "59e09b229d5ec3ed96a3d88f99ebefa8049ca79a7f2a2ab83a12d2a2dd4e064d",
+      "raw": "4c5ed2f86722603b70122c1b53096b5cfa02cf9e635a958c0aa2c91e0c2cea57"
+    },
+    "web/shufflizer/js/presets.js": {
+      "normalized": "e61b4cf167562a91fbb7790b4c28c1a2485227d1525f15ec54e58d1a1b2e0621",
+      "raw": "3ceb9ffe22201d7e53a488183cd46ab324992332c02dc6b5588345bac9643187"
+    },
+    "web/shufflizer/js/ui.js": {
+      "normalized": "be72a83e6c97dfcee20afbd69fc2e13f6352adfcaa04b12715c3c5a435f131ca",
+      "raw": "67c49015a34d17bb16e63c85317ada6ca18bdfc3c6523c4a8d14043cf0be2ebc"
+    },
+    "web/shufflizer/js/visuals.js": {
+      "normalized": "472fa0c74064e55f428cca3d7cc93ddc896e7ec57ba63400e68c6e6096fd086b",
+      "raw": "66560718176cdfa3a2316531d01e9c7301dcf659cdcff90dd84f40079b893e84"
+    }
+  },
+  "archive_sha256": "252757858e20194e918db1331c78b571494d7ffc87f7e017f68f530d76b66b91"
+}
